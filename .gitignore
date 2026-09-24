@@ -1,0 +1,12 @@
+# Ignore everything by default...
+*
+
+# ...but keep directories traversable so nested .py files can be tracked
+!*/
+
+# Track only Python scripts and this file
+!*.py
+!.gitignore
+
+# Never track bytecode caches
+__pycache__/
