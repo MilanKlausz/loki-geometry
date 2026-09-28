@@ -181,6 +181,7 @@ REFERENCE_BANKS_DATA = {
     },
 }
 
+
 def convert_reference_data_to_calibration_data(reference_data):
     """
     Converts REFERENCE_BANKS_DATA into the format used by calibration_data.
@@ -193,19 +194,21 @@ def convert_reference_data_to_calibration_data(reference_data):
     number_of_layers = 4
     for bank_id, data in reference_data.items():
         num_tubes_in_layer = int(data["num_tubes"] / number_of_layers)
-        calib_data.append({
-            "bank_id": bank_id,
-            "positions": [
-                {
-                    "tube_id": 0, #zero-indexed local tube id
-                    "first_pixel_end": [x for x in data["A"][0]],
-                    "last_pixel_end": [x for x in data["B"][0]],
-                },
-                {
-                    "tube_id": num_tubes_in_layer - 1, #zero-indexed local tube id
-                    "first_pixel_end": [x for x in data["A"][2]],
-                    "last_pixel_end": [x for x in data["B"][2]],
-                }
-            ]
-        })
+        calib_data.append(
+            {
+                "bank_id": bank_id,
+                "positions": [
+                    {
+                        "tube_id": 0,  # zero-indexed local tube id
+                        "first_pixel_end": [x for x in data["A"][0]],
+                        "last_pixel_end": [x for x in data["B"][0]],
+                    },
+                    {
+                        "tube_id": num_tubes_in_layer - 1,  # zero-indexed local tube id
+                        "first_pixel_end": [x for x in data["A"][2]],
+                        "last_pixel_end": [x for x in data["B"][2]],
+                    },
+                ],
+            }
+        )
     return calib_data

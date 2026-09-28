@@ -1,4 +1,5 @@
 """Tests of the Python port of the Geant4 pixel positions."""
+
 import os
 
 import numpy as np
@@ -7,14 +8,18 @@ from conftest import REPO_DIR
 
 from loki_geometry import geant4 as g4
 
-DGCODE_PIXEL_LOG = os.path.join(REPO_DIR, "..", "dgcode_projects", "LOKI", "G4GeoLoki", "scripts", "test_pixel_position.log")
+DGCODE_PIXEL_LOG = os.path.join(
+    REPO_DIR, "..", "dgcode_projects", "LOKI", "G4GeoLoki", "scripts", "test_pixel_position.log"
+)
 
 
 def test_port_matches_sb_loki_info_values():
     assert g4.validate() < 1e-5
 
 
-@pytest.mark.skipif(not os.path.exists(DGCODE_PIXEL_LOG), reason="dgcode_projects test log not available")
+@pytest.mark.skipif(
+    not os.path.exists(DGCODE_PIXEL_LOG), reason="dgcode_projects test log not available"
+)
 def test_port_matches_dgcode_pixel_file():
     """All straws of all banks (2 pixels per straw), file values rounded to 0.1 mm."""
     data = np.loadtxt(DGCODE_PIXEL_LOG, delimiter=",")

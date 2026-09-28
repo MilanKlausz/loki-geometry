@@ -186,11 +186,19 @@ from loki_geometry.survey import get_measured_calibration_data
 from loki_geometry.calibration import Detectors
 from loki_geometry.geant4 import pixel_centre, pixel_id
 
-measured = Detectors(get_measured_calibration_data(sample_to_window_distance=100.0), use_pixel_centre_position=True, verbose=True)
-measured.compare_to(measured.intended, label="intended")      # corner shifts vs REFERENCE_BANKS_DATA
-corners = measured.formatted_data()                            # det_banks_data format (straw ends)
-x, y, z = pixel_centre(pixel_id(bank_id=1, tube_id=13, straw_id=3, pixel_in_straw=0))  # Geant4 pixel centre [mm]
-pixels = compute_instrument_pixels(REFERENCE_BANKS_DATA)      # {bank_id: BankPixels}: ids, offsets, positions [mm]
+measured = Detectors(
+    get_measured_calibration_data(sample_to_window_distance=100.0),
+    use_pixel_centre_position=True,
+    verbose=True,
+)
+measured.compare_to(measured.intended, label="intended")  # corner shifts vs REFERENCE_BANKS_DATA
+corners = measured.formatted_data()  # det_banks_data format (straw ends)
+x, y, z = pixel_centre(
+    pixel_id(bank_id=1, tube_id=13, straw_id=3, pixel_in_straw=0)
+)  # Geant4 pixel centre [mm]
+pixels = compute_instrument_pixels(
+    REFERENCE_BANKS_DATA
+)  # {bank_id: BankPixels}: ids, offsets, positions [mm]
 ```
 
 ## Open points / known issues

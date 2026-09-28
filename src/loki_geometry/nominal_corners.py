@@ -25,7 +25,9 @@ def _signed_tilt(bank_id):
 class Bank:
     BANK_DISTANCES = np.array(c.BANK_DISTANCES)
     STRAW_LENGTHS = np.array(c.STRAW_LENGTHS)
-    BANK_TILT_ANGLES = np.array([_signed_tilt(b) for b in c.BANK_IDS])  # counterclockwise rotation angles
+    BANK_TILT_ANGLES = np.array(
+        [_signed_tilt(b) for b in c.BANK_IDS]
+    )  # counterclockwise rotation angles
     BANK_POSITION_ANGLES = np.radians(c.BANK_POSITION_ANGLES)  # counterclockwise rotation angles
     BANK_OFFSETS = np.array(c.BANK_OFFSETS)
     PACKS_PER_BANK = np.array(c.PACKS_PER_BANK)
@@ -34,7 +36,9 @@ class Bank:
     TUBE_GRID_SIDE = c.TUBE_GRID_SIDE  # [mm]
     TUBE_GRID_ANGLE = c.TUBE_GRID_ANGLE  # [deg]
     TUBE_RADIUS = c.TUBE_OUTER_RADIUS  # [mm]
-    BANK_DEPTH = (c.LAYERS_PER_BANK - 1) * TUBE_GRID_BASE  # distance between first and last layer centers
+    BANK_DEPTH = (
+        c.LAYERS_PER_BANK - 1
+    ) * TUBE_GRID_BASE  # distance between first and last layer centers
 
     def __init__(self, bankId):
         self.bankId = bankId
@@ -66,11 +70,16 @@ class Bank:
             # These banks consist of packs mounted upside-down
             firstLayerToLastLayerVector[1] *= -1
 
-        self.positionA = np.array([
+        self.positionA = np.array(
+            [
                 firstTubePosition,  # top tube in first layer
-                np.add(firstTubePosition, firstLayerToLastLayerVector),  # top tube in last (4th) layer
+                np.add(
+                    firstTubePosition, firstLayerToLastLayerVector
+                ),  # top tube in last (4th) layer
                 np.add(firstTubePosition, topToBottomVector),  # bottom tube in first layer
-                np.add(np.add(firstTubePosition, firstLayerToLastLayerVector),topToBottomVector) # bottom tube in last (4th) lay
+                np.add(
+                    np.add(firstTubePosition, firstLayerToLastLayerVector), topToBottomVector
+                ),  # bottom tube in last (4th) lay
             ]
         )
         self.positionB = np.add(self.positionA, positionAtoBvector)
@@ -113,10 +122,17 @@ class Bank:
         if self.isVerticalBank:
             direction = np.array([np.sin(angle), 0, np.cos(angle)])
             # bank normal: +z rotated in the same way as the corner points
-            normal = np.array([0.0, 0.0, 1.0]) @ Bank.rotation_matrix(-m.radians(90), "z").T @ Bank.rotation_matrix(self.BANK_TILT_ANGLES[self.bankId], "y").T
+            normal = (
+                np.array([0.0, 0.0, 1.0])
+                @ Bank.rotation_matrix(-m.radians(90), "z").T
+                @ Bank.rotation_matrix(self.BANK_TILT_ANGLES[self.bankId], "y").T
+            )
         else:
             direction = np.array([0, np.sin(angle), np.cos(angle)])
-            normal = np.array([0.0, 0.0, 1.0]) @ Bank.rotation_matrix(self.BANK_TILT_ANGLES[self.bankId], "x").T
+            normal = (
+                np.array([0.0, 0.0, 1.0])
+                @ Bank.rotation_matrix(self.BANK_TILT_ANGLES[self.bankId], "x").T
+            )
 
         translation = direction * self.BANK_DISTANCES[self.bankId] + normal * self.TUBE_RADIUS
         self.positionA = np.add(self.positionA, translation)
@@ -147,6 +163,7 @@ class Bank:
             return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
         else:
             raise ValueError("Invalid axis. Must be 'x', 'y', or 'z'.")
+
 
 class Detectors:
     BANK_IDS = list(c.BANK_IDS)
@@ -190,17 +207,18 @@ def compare_arrays(arr1, arr2, tolerance=1.0):
     else:
         print(f"Arrays match within tolerance ({tolerance} mm).")
 
+
 def main(bankIds_to_process):
     detectors = Detectors()
 
-    #TODO this comparison could be part of the Detector class
+    # TODO this comparison could be part of the Detector class
     for bankId in bankIds_to_process:
         positionA = detectors.banks[bankId].positionA
         positionB = detectors.banks[bankId].positionB
 
         reference_banks_data = detectors._REFERENCE_BANKS_DATA
 
-        tolerance = 1 #[mm]
+        tolerance = 1  # [mm]
         print(f"\nComparing bank {bankId} position A to reference values:")
         compare_arrays(positionA, reference_banks_data[bankId]["A"], tolerance)
 

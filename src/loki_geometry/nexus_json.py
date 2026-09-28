@@ -69,6 +69,7 @@ CARRIAGE_VALUE_PATH = f"{INSTRUMENT_PATH}/detector_carriage/value"
 # Generic NeXus-JSON node builders
 # ---------------------------------------------------------------------------
 
+
 def attribute(name, values, dtype=None):
     node = {"name": name, "values": values}
     if dtype is not None:
@@ -92,7 +93,12 @@ def dataset(name, values, dtype, attributes=None):
 
 
 def group(name, children, nx_class):
-    return {"name": name, "type": "group", "children": children, "attributes": [nx_class_attribute(nx_class)]}
+    return {
+        "name": name,
+        "type": "group",
+        "children": children,
+        "attributes": [nx_class_attribute(nx_class)],
+    }
 
 
 def _rounded_list(array, decimals):
@@ -102,6 +108,7 @@ def _rounded_list(array, decimals):
 # ---------------------------------------------------------------------------
 # LOKI specific nodes
 # ---------------------------------------------------------------------------
+
 
 def bank_name(bank_id):
     return f"loki_detector_{bank_id}"
@@ -117,12 +124,17 @@ def translation_dataset(name, position_mm, decimals=DEFAULT_DECIMALS):
     position = np.asarray(position_mm, dtype=float) * MM_TO_M
     magnitude = float(np.linalg.norm(position))
     vector = position / magnitude if magnitude > 0 else np.array([0.0, 0.0, 1.0])
-    return dataset(name, round(magnitude, decimals), "float", [
-        attribute("transformation_type", "translation"),
-        attribute("depends_on", ".", "string"),
-        attribute("vector", vector.tolist(), "float"),
-        units_attribute(),
-    ])
+    return dataset(
+        name,
+        round(magnitude, decimals),
+        "float",
+        [
+            attribute("transformation_type", "translation"),
+            attribute("depends_on", ".", "string"),
+            attribute("vector", vector.tolist(), "float"),
+            units_attribute(),
+        ],
+    )
 
 
 def pixel_shape_vertices(bank_pixels):
@@ -141,17 +153,28 @@ def pixel_shape_vertices(bank_pixels):
 def pixel_shape_group(bank_pixels, decimals=DEFAULT_DECIMALS):
     """NXcylindrical_geometry of one pixel (see pixel_shape_vertices), in [m]."""
     vertices = pixel_shape_vertices(bank_pixels) * MM_TO_M
-    return group("pixel_shape", [
-        dataset("cylinders", [[0, 1, 2]], "int32"),
-        dataset("vertices", _rounded_list(vertices, decimals), "float", [units_attribute()]),
-    ], "NXcylindrical_geometry")
+    return group(
+        "pixel_shape",
+        [
+            dataset("cylinders", [[0, 1, 2]], "int32"),
+            dataset("vertices", _rounded_list(vertices, decimals), "float", [units_attribute()]),
+        ],
+        "NXcylindrical_geometry",
+    )
 
 
 def pixel_offset_datasets(bank_pixels, decimals=DEFAULT_DECIMALS):
     """x/y/z_pixel_offset datasets [m]."""
     offsets = bank_pixels.offsets * MM_TO_M
-    return [dataset(f"{axis}_pixel_offset", _rounded_list(offsets[:, index], decimals), "float", [units_attribute()])
-            for index, axis in enumerate("xyz")]
+    return [
+        dataset(
+            f"{axis}_pixel_offset",
+            _rounded_list(offsets[:, index], decimals),
+            "float",
+            [units_attribute()],
+        )
+        for index, axis in enumerate("xyz")
+    ]
 
 
 def bank_group(bank_pixels, decimals=DEFAULT_DECIMALS):
@@ -166,9 +189,13 @@ def bank_group(bank_pixels, decimals=DEFAULT_DECIMALS):
         depends_on = CARRIAGE_VALUE_PATH
     else:
         name = translation_name(bank_id)
-        children.append(group("transformations",
-                               [translation_dataset(name, bank_pixels.translation, decimals)],
-                               "NXtransformations"))
+        children.append(
+            group(
+                "transformations",
+                [translation_dataset(name, bank_pixels.translation, decimals)],
+                "NXtransformations",
+            )
+        )
         depends_on = f"{INSTRUMENT_PATH}/{bank_name(bank_id)}/transformations/{name}"
     children.append(dataset("depends_on", depends_on, "string"))
     return group(bank_name(bank_id), children, "NXdetector")
@@ -178,20 +205,28 @@ def build_output(instrument_pixels, corners_source, decimals=DEFAULT_DECIMALS):
     """The whole output dictionary (see the module docstring)."""
     pixels_per_straw = {bp.pixels_per_straw for bp in instrument_pixels.values()}
     pixel_references = {bp.pixel_reference for bp in instrument_pixels.values()}
-    output = {"info": {
-        "description": "LOKI detector pixel geometry (geometry parts of the loki_detector_<id> groups)",
-        "corners_source": corners_source,
-        "pixels_per_straw": pixels_per_straw.pop() if len(pixels_per_straw) == 1 else sorted(pixels_per_straw),
-        "length_unit": LENGTH_UNIT,
-        "pixel_reference": pixel_references.pop() if len(pixel_references) == 1 else sorted(pixel_references),
-        "bank_translation": "from the sample to corner A[0]: the first pixel end of tube 0 (front layer, top/left) on the tube axis",
-        "carriage_bank": f"{bank_name(CARRIAGE_BANK_ID)} translation = {CARRIAGE_ZERO_NAME} "
-                         f"(in {INSTRUMENT_PATH}/detector_carriage/transformations)",
-    }}
+    output = {
+        "info": {
+            "description": "LOKI detector pixel geometry (geometry parts of the loki_detector_<id> groups)",
+            "corners_source": corners_source,
+            "pixels_per_straw": pixels_per_straw.pop()
+            if len(pixels_per_straw) == 1
+            else sorted(pixels_per_straw),
+            "length_unit": LENGTH_UNIT,
+            "pixel_reference": pixel_references.pop()
+            if len(pixel_references) == 1
+            else sorted(pixel_references),
+            "bank_translation": "from the sample to corner A[0]: the first pixel end of tube 0 (front layer, top/left) on the tube axis",
+            "carriage_bank": f"{bank_name(CARRIAGE_BANK_ID)} translation = {CARRIAGE_ZERO_NAME} "
+            f"(in {INSTRUMENT_PATH}/detector_carriage/transformations)",
+        }
+    }
     for bank_id, bank_pixels in instrument_pixels.items():
         output[bank_name(bank_id)] = bank_group(bank_pixels, decimals)
         if bank_id == CARRIAGE_BANK_ID:
-            output[CARRIAGE_ZERO_NAME] = translation_dataset(CARRIAGE_ZERO_NAME, bank_pixels.translation, decimals)
+            output[CARRIAGE_ZERO_NAME] = translation_dataset(
+                CARRIAGE_ZERO_NAME, bank_pixels.translation, decimals
+            )
     return output
 
 
@@ -203,28 +238,45 @@ def write_json(output, filename):
 def reference_corners():
     """Corners of all banks from REFERENCE_BANKS_DATA (the intended geometry)."""
     from .reference_data import REFERENCE_BANKS_DATA
+
     return dict(REFERENCE_BANKS_DATA)
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Write the LOKI detector pixel geometry as NeXus-JSON nodes.")
-    parser.add_argument("-o", "--output", default="loki_detector_pixels.json", help="output JSON file")
+    parser = argparse.ArgumentParser(
+        description="Write the LOKI detector pixel geometry as NeXus-JSON nodes."
+    )
+    parser.add_argument(
+        "-o", "--output", default="loki_detector_pixels.json", help="output JSON file"
+    )
     parser.add_argument("--pixels-per-straw", type=int, default=DEFAULT_PIXELS_PER_STRAW)
-    parser.add_argument("--decimals", type=int, default=DEFAULT_DECIMALS, help="rounding of the coordinates in [m]")
-    parser.add_argument("--banks", type=int, nargs="*", default=None, help="only these banks (default: all)")
-    parser.add_argument("--pixel-reference", choices=PIXEL_REFERENCES, default=PIXEL_CENTRE,
-                        help="what the pixel offsets point to: pixel_centre (default) or pixel_base "
-                             "(centre of the pixel's first face); the pixel shape follows")
+    parser.add_argument(
+        "--decimals", type=int, default=DEFAULT_DECIMALS, help="rounding of the coordinates in [m]"
+    )
+    parser.add_argument(
+        "--banks", type=int, nargs="*", default=None, help="only these banks (default: all)"
+    )
+    parser.add_argument(
+        "--pixel-reference",
+        choices=PIXEL_REFERENCES,
+        default=PIXEL_CENTRE,
+        help="what the pixel offsets point to: pixel_centre (default) or pixel_base "
+        "(centre of the pixel's first face); the pixel shape follows",
+    )
     args = parser.parse_args(argv)
 
     corners = reference_corners()
     if args.banks is not None:
         corners = {bank_id: corners[bank_id] for bank_id in args.banks}
-    instrument_pixels = compute_instrument_pixels(corners, args.pixels_per_straw, pixel_reference=args.pixel_reference)
+    instrument_pixels = compute_instrument_pixels(
+        corners, args.pixels_per_straw, pixel_reference=args.pixel_reference
+    )
     write_json(build_output(instrument_pixels, "REFERENCE_BANKS_DATA", args.decimals), args.output)
     total = sum(len(bp.pixel_ids) for bp in instrument_pixels.values())
-    print(f"Written {args.output}: {len(instrument_pixels)} banks, {total} pixels, "
-          f"{args.pixels_per_straw} pixels per straw, pixel reference: {args.pixel_reference}")
+    print(
+        f"Written {args.output}: {len(instrument_pixels)} banks, {total} pixels, "
+        f"{args.pixels_per_straw} pixels per straw, pixel reference: {args.pixel_reference}"
+    )
 
 
 if __name__ == "__main__":

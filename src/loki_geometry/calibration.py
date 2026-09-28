@@ -87,7 +87,6 @@ from .reference_data import REFERENCE_BANKS_DATA, convert_reference_data_to_cali
 
 
 class Detectors:
-
     # Bank constants (single source: constants.py)
     tubes_per_layer_by_bank = np.array(c.TUBES_PER_LAYER)
     tube_length_by_bank = np.array(c.STRAW_LENGTHS)  # [mm] effective straw length
@@ -95,16 +94,27 @@ class Detectors:
     # constants.py for how the distances are defined: in the section plane,
     # to the front face centre, with the offsets along the tubes on top).
     intended_bank_tilt_angles = np.array(c.BANK_TILT_ANGLES)  # [deg]
-    intended_bank_distances = np.array(c.BANK_DISTANCES)  # [mm] #TODO the rear bank distance should be an input value
-    intended_bank_position_angles = np.array(c.BANK_POSITION_ANGLES)  # [deg], + is up (horizontal) / left (vertical)
+    intended_bank_distances = np.array(
+        c.BANK_DISTANCES
+    )  # [mm] #TODO the rear bank distance should be an input value
+    intended_bank_position_angles = np.array(
+        c.BANK_POSITION_ANGLES
+    )  # [deg], + is up (horizontal) / left (vertical)
     intended_bank_offsets = np.array(c.BANK_OFFSETS)  # [mm] (x, y, z)
     vertical_bank_ids = c.VERTICAL_BANK_IDS
     upside_down_bank_ids = c.UPSIDE_DOWN_BANK_IDS
     straw_pixel_number = c.DEFAULT_PIXELS_PER_STRAW
 
-    REFERENCE_BANKS_DATA = REFERENCE_BANKS_DATA # reference data from the generate-nexus repo (also serving as template for output)
+    REFERENCE_BANKS_DATA = REFERENCE_BANKS_DATA  # reference data from the generate-nexus repo (also serving as template for output)
 
-    def __init__(self, calibration_data, use_pixel_centre_position, verbose=False, intended="reference", run_checks=True):
+    def __init__(
+        self,
+        calibration_data,
+        use_pixel_centre_position,
+        verbose=False,
+        intended="reference",
+        run_checks=True,
+    ):
         """calibration_data: list of per bank dictionaries (see the module docstring).
         intended: what the banks are compared with (tilt angles, sample-bank
           distances, front face centres, corner shifts):
@@ -121,18 +131,26 @@ class Detectors:
             bank_id = calibration_bank_data["bank_id"]
             self.banks[bank_id] = Bank(
                 calibration_bank_data,
-                is_upside_down_bank = bank_id in self.upside_down_bank_ids,
-                tubes_per_layer = self.tubes_per_layer_by_bank[bank_id],
-                tube_length = self.tube_length_by_bank[bank_id],
-                straw_pixel_number = self.straw_pixel_number,
-                use_pixel_centre_position = use_pixel_centre_position,
-                bank_id = bank_id)
+                is_upside_down_bank=bank_id in self.upside_down_bank_ids,
+                tubes_per_layer=self.tubes_per_layer_by_bank[bank_id],
+                tube_length=self.tube_length_by_bank[bank_id],
+                straw_pixel_number=self.straw_pixel_number,
+                use_pixel_centre_position=use_pixel_centre_position,
+                bank_id=bank_id,
+            )
 
         if isinstance(intended, str) and intended == "reference":
-            intended = Detectors(convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA),
-                                 use_pixel_centre_position, verbose=False, intended=None, run_checks=False)
+            intended = Detectors(
+                convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA),
+                use_pixel_centre_position,
+                verbose=False,
+                intended=None,
+                run_checks=False,
+            )
         self.intended = intended
-        self.intended_label = "REFERENCE_BANKS_DATA" if intended is not None else "Geant4 nominal values"
+        self.intended_label = (
+            "REFERENCE_BANKS_DATA" if intended is not None else "Geant4 nominal values"
+        )
 
         if run_checks:
             self._check_vector_orthogonality()
@@ -177,16 +195,16 @@ class Detectors:
 
     def verify_positions_against_reference_data(self):
         for bank_id in self.bank_ids:
-            tolerance = 1 #[mm] # NOTE this could be a input variable
+            tolerance = 1  # [mm] # NOTE this could be a input variable
             print(f"\nComparing bank {bank_id} position A to reference values:")
-            self.compare_arrays(self.banks[bank_id].positionA,
-                                self.REFERENCE_BANKS_DATA[bank_id]["A"],
-                                tolerance)
+            self.compare_arrays(
+                self.banks[bank_id].positionA, self.REFERENCE_BANKS_DATA[bank_id]["A"], tolerance
+            )
 
             print(f"\nComparing bank {bank_id} position B to reference values:")
-            self.compare_arrays(self.banks[bank_id].positionB,
-                                self.REFERENCE_BANKS_DATA[bank_id]["B"],
-                                tolerance)
+            self.compare_arrays(
+                self.banks[bank_id].positionB, self.REFERENCE_BANKS_DATA[bank_id]["B"], tolerance
+            )
 
     @staticmethod
     def compare_arrays(arr1, arr2, tolerance=1.0):
@@ -203,13 +221,13 @@ class Detectors:
 
     def print_quality_report(self):
         """Print the quality indicators of each bank (see Bank.quality):
-          - plane fit: the largest distance of the 4 input points from the
-            least-squares plane (and which point it is),
-          - the angle between the 2 input tubes (parallelism),
-          - the spacing of the 2 input tubes in pitches vs the id difference,
-          - how differently the 2 tubes predict the position of tube 0,
-          - end-to-end: how well the final 8 corners reproduce the input
-            tube ends (residuals along / across the tubes / out of plane)."""
+        - plane fit: the largest distance of the 4 input points from the
+          least-squares plane (and which point it is),
+        - the angle between the 2 input tubes (parallelism),
+        - the spacing of the 2 input tubes in pitches vs the id difference,
+        - how differently the 2 tubes predict the position of tube 0,
+        - end-to-end: how well the final 8 corners reproduce the input
+          tube ends (residuals along / across the tubes / out of plane)."""
         point_names = ["tube a first", "tube a last", "tube b first", "tube b last"]
         print("\n=== Quality report ===")
         for bank_id in self.bank_ids:
@@ -218,50 +236,95 @@ class Detectors:
             ta, tb = bank.input_tubes
             worst = int(np.argmax(np.abs(q["plane_residuals"])))
             print(f"\nBank {bank_id} (input tubes {ta['tube_id']} and {tb['tube_id']}):")
-            print(f"  plane fit: largest outlier {q['plane_residuals'][worst]:+.3f} mm ({point_names[worst]}), "
-                  f"rms {np.sqrt(np.mean(q['plane_residuals']**2)):.3f} mm")
+            print(
+                f"  plane fit: largest outlier {q['plane_residuals'][worst]:+.3f} mm ({point_names[worst]}), "
+                f"rms {np.sqrt(np.mean(q['plane_residuals'] ** 2)):.3f} mm"
+            )
             print(f"  angle between the 2 input tubes: {q['tube_angle_deg']:.3f} deg")
-            print(f"  tube spacing: {q['spacing_in_pitches']:.3f} pitches (id difference {tb['tube_id'] - ta['tube_id']}, "
-                  f"deviation {(q['spacing_in_pitches'] - (tb['tube_id'] - ta['tube_id'])) * bank.tube_tube_distance:+.2f} mm)")
+            print(
+                f"  tube spacing: {q['spacing_in_pitches']:.3f} pitches (id difference {tb['tube_id'] - ta['tube_id']}, "
+                f"deviation {(q['spacing_in_pitches'] - (tb['tube_id'] - ta['tube_id'])) * bank.tube_tube_distance:+.2f} mm)"
+            )
             along, across, normal = q["tube0_prediction_difference"]
-            print(f"  tube 0 predicted by the 2 tubes differs by: along {along:+.2f}, across {across:+.2f}, normal {normal:+.2f} mm")
-            print("  reproduction of the input tubes by the final corners (input - predicted midpoint) [mm]:")
-            for tube_id, (r_along, r_across, r_normal), length_difference in q["reproduction_residuals"]:
-                print(f"    tube {tube_id:2d}: along {r_along:+6.2f}  across {r_across:+6.2f}  normal {r_normal:+6.2f}"
-                      f"   (input length - straw length: {length_difference:+.2f})")
+            print(
+                f"  tube 0 predicted by the 2 tubes differs by: along {along:+.2f}, across {across:+.2f}, normal {normal:+.2f} mm"
+            )
+            print(
+                "  reproduction of the input tubes by the final corners (input - predicted midpoint) [mm]:"
+            )
+            for tube_id, (r_along, r_across, r_normal), length_difference in q[
+                "reproduction_residuals"
+            ]:
+                print(
+                    f"    tube {tube_id:2d}: along {r_along:+6.2f}  across {r_across:+6.2f}  normal {r_normal:+6.2f}"
+                    f"   (input length - straw length: {length_difference:+.2f})"
+                )
             max_residual = max(np.linalg.norm(r) for _, r, _ in q["reproduction_residuals"])
             print(f"    largest 3D midpoint residual: {max_residual:.2f} mm")
             tilt, intended_tilt = self.tilt_angle(bank_id), self.intended_tilt(bank_id)
-            print(f"  tilt angle: {tilt:.3f} deg, intended {intended_tilt:.3f} deg ({self.intended_label}; Geant4 nominal "
-                  f"{self.intended_bank_tilt_angles[bank_id]}), difference {tilt - intended_tilt:+.3f} deg")
+            print(
+                f"  tilt angle: {tilt:.3f} deg, intended {intended_tilt:.3f} deg ({self.intended_label}; Geant4 nominal "
+                f"{self.intended_bank_tilt_angles[bank_id]}), difference {tilt - intended_tilt:+.3f} deg"
+            )
             intended_centre = self.intended_centre(bank_id)
             intended_distance = np.linalg.norm(intended_centre)
             shift = bank.front_face_centre - intended_centre
-            print(f"  sample - front face centre distance: {bank.sample_bank_distance:.2f} mm, intended {intended_distance:.2f} mm "
-                  f"({self.intended_label}; Geant4 nominal {np.linalg.norm(self.intended_front_face_centre(bank_id)):.2f}), "
-                  f"difference {bank.sample_bank_distance - intended_distance:+.2f} mm")
-            print(f"  front face centre shift from intended: x {shift[0]:+.2f}  y {shift[1]:+.2f}  z {shift[2]:+.2f} mm")
-            (d, a, o), (di, ai, oi), (dn, an, on) = self.section_parameters(bank_id), self.intended_section_parameters(bank_id), self.nominal_section_parameters(bank_id)
-            print("  as in the drawing / Geant4 (section plane distance, position angle, offset along the tubes):")
-            print(f"    distance {d:8.2f} mm, intended {di:8.2f} (Geant4 nominal {dn}), difference {d - di:+6.2f} mm")
-            print(f"    angle    {a:8.3f} deg, intended {ai:8.3f} (Geant4 nominal {an}), difference {a - ai:+6.3f} deg")
-            print(f"    offset   {o:8.2f} mm, intended {oi:8.2f} (Geant4 nominal {on}), difference {o - oi:+6.2f} mm")
+            print(
+                f"  sample - front face centre distance: {bank.sample_bank_distance:.2f} mm, intended {intended_distance:.2f} mm "
+                f"({self.intended_label}; Geant4 nominal {np.linalg.norm(self.intended_front_face_centre(bank_id)):.2f}), "
+                f"difference {bank.sample_bank_distance - intended_distance:+.2f} mm"
+            )
+            print(
+                f"  front face centre shift from intended: x {shift[0]:+.2f}  y {shift[1]:+.2f}  z {shift[2]:+.2f} mm"
+            )
+            (d, a, o), (di, ai, oi), (dn, an, on) = (
+                self.section_parameters(bank_id),
+                self.intended_section_parameters(bank_id),
+                self.nominal_section_parameters(bank_id),
+            )
+            print(
+                "  as in the drawing / Geant4 (section plane distance, position angle, offset along the tubes):"
+            )
+            print(
+                f"    distance {d:8.2f} mm, intended {di:8.2f} (Geant4 nominal {dn}), difference {d - di:+6.2f} mm"
+            )
+            print(
+                f"    angle    {a:8.3f} deg, intended {ai:8.3f} (Geant4 nominal {an}), difference {a - ai:+6.3f} deg"
+            )
+            print(
+                f"    offset   {o:8.2f} mm, intended {oi:8.2f} (Geant4 nominal {on}), difference {o - oi:+6.2f} mm"
+            )
 
-        print(f"\nBank placement as in the drawing / Geant4 (measured - intended, intended = {self.intended_label}):")
-        print("  bank | section distance [mm]      diff | position angle [deg]    diff | offset along tubes [mm]    diff")
+        print(
+            f"\nBank placement as in the drawing / Geant4 (measured - intended, intended = {self.intended_label}):"
+        )
+        print(
+            "  bank | section distance [mm]      diff | position angle [deg]    diff | offset along tubes [mm]    diff"
+        )
         for bank_id in self.bank_ids:
-            (d, a, o), (di, ai, oi) = self.section_parameters(bank_id), self.intended_section_parameters(bank_id)
-            print(f"  {bank_id:4d} |      {d:8.2f} {di:8.2f} {d - di:+7.2f} |      {a:7.3f} {ai:7.3f} {a - ai:+6.3f} |       {o:7.2f} {oi:7.2f} {o - oi:+6.2f}")
+            (d, a, o), (di, ai, oi) = (
+                self.section_parameters(bank_id),
+                self.intended_section_parameters(bank_id),
+            )
+            print(
+                f"  {bank_id:4d} |      {d:8.2f} {di:8.2f} {d - di:+7.2f} |      {a:7.3f} {ai:7.3f} {a - ai:+6.3f} |       {o:7.2f} {oi:7.2f} {o - oi:+6.2f}"
+            )
 
         print(f"\nSummary (measured - intended, intended = {self.intended_label}):")
-        print("  bank | tilt [deg]  measured intended   diff | front face distance [mm] measured intended    diff | largest midpoint residual [mm]")
+        print(
+            "  bank | tilt [deg]  measured intended   diff | front face distance [mm] measured intended    diff | largest midpoint residual [mm]"
+        )
         for bank_id in self.bank_ids:
             bank = self.banks[bank_id]
             tilt, intended_tilt = self.tilt_angle(bank_id), self.intended_tilt(bank_id)
             intended_distance = np.linalg.norm(self.intended_centre(bank_id))
-            max_residual = max(np.linalg.norm(r) for _, r, _ in bank.quality["reproduction_residuals"])
-            print(f"  {bank_id:4d} |             {tilt:8.3f} {intended_tilt:8.3f} {tilt - intended_tilt:+6.3f} |"
-                  f"                          {bank.sample_bank_distance:8.2f} {intended_distance:8.2f} {bank.sample_bank_distance - intended_distance:+7.2f} | {max_residual:.2f}")
+            max_residual = max(
+                np.linalg.norm(r) for _, r, _ in bank.quality["reproduction_residuals"]
+            )
+            print(
+                f"  {bank_id:4d} |             {tilt:8.3f} {intended_tilt:8.3f} {tilt - intended_tilt:+6.3f} |"
+                f"                          {bank.sample_bank_distance:8.2f} {intended_distance:8.2f} {bank.sample_bank_distance - intended_distance:+7.2f} | {max_residual:.2f}"
+            )
 
     def compare_to(self, other, label="other"):
         """Compare the corner positions with another Detectors object (e.g. the
@@ -273,24 +336,36 @@ class Detectors:
             if bank_id not in other.banks:
                 continue
             mine = np.concatenate([self.banks[bank_id].positionA, self.banks[bank_id].positionB])
-            theirs = np.concatenate([other.banks[bank_id].positionA, other.banks[bank_id].positionB])
+            theirs = np.concatenate(
+                [other.banks[bank_id].positionA, other.banks[bank_id].positionB]
+            )
             diff = mine - theirs
             mean = diff.mean(axis=0)
-            print(f"  bank {bank_id}: mean shift x {mean[0]:+7.2f} y {mean[1]:+7.2f} z {mean[2]:+7.2f}, "
-                  f"largest corner distance {np.max(np.linalg.norm(diff, axis=1)):6.2f}")
+            print(
+                f"  bank {bank_id}: mean shift x {mean[0]:+7.2f} y {mean[1]:+7.2f} z {mean[2]:+7.2f}, "
+                f"largest corner distance {np.max(np.linalg.norm(diff, axis=1)):6.2f}"
+            )
 
     def _check_vector_orthogonality(self):
         """Verify that the base vectors are perpendicular in all banks"""
         all_vectors_are_orthogonal = True
         for bank_id, bank in self.banks.items():
             if not np.isclose(np.dot(bank.vector_along_tubes, bank.vector_perpendicular_tubes), 0):
-                print(f"Warning: Bank {bank_id} vector_along_tubes and vector_perpendicular_tubes are not perpendicular!")
+                print(
+                    f"Warning: Bank {bank_id} vector_along_tubes and vector_perpendicular_tubes are not perpendicular!"
+                )
                 all_vectors_are_orthogonal = False
             if not np.isclose(np.dot(bank.vector_along_tubes, bank.vector_perpendicular_layers), 0):
-                print(f"Warning: Bank {bank_id} vector_along_tubes and vector_perpendicular_layers are not perpendicular!")
+                print(
+                    f"Warning: Bank {bank_id} vector_along_tubes and vector_perpendicular_layers are not perpendicular!"
+                )
                 all_vectors_are_orthogonal = False
-            if not np.isclose(np.dot(bank.vector_perpendicular_tubes, bank.vector_perpendicular_layers), 0):
-                print(f"Warning: Bank {bank_id} vector_perpendicular_tubes and vector_perpendicular_layers are not perpendicular!")
+            if not np.isclose(
+                np.dot(bank.vector_perpendicular_tubes, bank.vector_perpendicular_layers), 0
+            ):
+                print(
+                    f"Warning: Bank {bank_id} vector_perpendicular_tubes and vector_perpendicular_layers are not perpendicular!"
+                )
                 all_vectors_are_orthogonal = False
         if all_vectors_are_orthogonal:
             print("All bank base vectors are orthogonal.")
@@ -327,8 +402,11 @@ class Detectors:
     def nominal_section_parameters(self, bank_id):
         """Geant4 nominal (distance, position angle, offset along the tubes)."""
         axis = 1 if bank_id in self.vertical_bank_ids else 0
-        return (self.intended_bank_distances[bank_id], self.intended_bank_position_angles[bank_id],
-                self.intended_bank_offsets[bank_id][axis])
+        return (
+            self.intended_bank_distances[bank_id],
+            self.intended_bank_position_angles[bank_id],
+            self.intended_bank_offsets[bank_id][axis],
+        )
 
     def intended_section_parameters(self, bank_id):
         """Intended (distance, position angle, offset): from the intended geometry if given, else nominal."""
@@ -352,7 +430,11 @@ class Detectors:
         perpendicular to the tubes and the y axis (horizontal banks) or the
         x axis (vertical banks). Only the magnitude is returned."""
         bank = self.banks[bank_id]
-        axis = np.array([1.0, 0.0, 0.0]) if bank_id in self.vertical_bank_ids else np.array([0.0, 1.0, 0.0])
+        axis = (
+            np.array([1.0, 0.0, 0.0])
+            if bank_id in self.vertical_bank_ids
+            else np.array([0.0, 1.0, 0.0])
+        )
         dot_product = np.dot(bank.vector_perpendicular_tubes, axis)
         return np.degrees(np.arccos(np.clip(abs(dot_product), -1.0, 1.0)))
 
@@ -362,23 +444,32 @@ class Detectors:
         for bank_id in self.banks:
             tilt_angle, intended = self.tilt_angle(bank_id), self.intended_tilt(bank_id)
             if not np.isclose(tilt_angle, intended, atol=angle_tolerance):
-                print(f"Warning: Bank {bank_id} tilt angle {tilt_angle:.3f} degrees differs from intended {intended:.3f} degrees ({self.intended_label}).")
+                print(
+                    f"Warning: Bank {bank_id} tilt angle {tilt_angle:.3f} degrees differs from intended {intended:.3f} degrees ({self.intended_label})."
+                )
                 all_tilt_angles_agree = False
         if all_tilt_angles_agree:
-            print(f"All bank tilt angles agree with the intended values ({self.intended_label}) within tolerance {angle_tolerance} degrees.")
+            print(
+                f"All bank tilt angles agree with the intended values ({self.intended_label}) within tolerance {angle_tolerance} degrees."
+            )
 
     def _verify_bank_distance(self):
         """Compare the sample - front face centre distance with the intended one
         (see intended_centre / intended_front_face_centre)."""
-        tolerance = 1.0 # [mm]
+        tolerance = 1.0  # [mm]
         all_distances_agree = True
         for bank_id, bank in self.banks.items():
             intended = np.linalg.norm(self.intended_centre(bank_id))
             if not np.isclose(bank.sample_bank_distance, intended, atol=tolerance):
-                print(f"Warning: Bank {bank_id} sample bank distance {bank.sample_bank_distance:.1f} mm differs from intended {intended:.1f} mm ({self.intended_label}).")
+                print(
+                    f"Warning: Bank {bank_id} sample bank distance {bank.sample_bank_distance:.1f} mm differs from intended {intended:.1f} mm ({self.intended_label})."
+                )
                 all_distances_agree = False
         if all_distances_agree:
-            print(f"All bank sample-bank distances agree with the intended values ({self.intended_label}) within tolerance {tolerance} mm.")
+            print(
+                f"All bank sample-bank distances agree with the intended values ({self.intended_label}) within tolerance {tolerance} mm."
+            )
+
 
 class Bank:
     """One detector bank, described by its 8 corner positions.
@@ -388,18 +479,32 @@ class Bank:
     back layer bottom tube; "top/bottom" = lowest/highest local tube id, i.e.
     left/right for vertical banks). See the module docstring for the algorithm.
     """
-    tube_tube_distance = c.TUBE_GRID_SIDE  # [mm] distance of neighbouring tubes in a layer
-    front_to_back_up_distance = c.FRONT_TO_BACK_IN_PLANE  # [mm] front->back layer shift in the tube plane (18.84)
-    front_to_back_in_distance = c.FRONT_TO_BACK_NORMAL  # [mm] front->back layer shift along the normal (78.78)
 
-    def __init__(self, calibration_bank_data, is_upside_down_bank, tubes_per_layer, tube_length,  straw_pixel_number, use_pixel_centre_position=True, bank_id=None):
+    tube_tube_distance = c.TUBE_GRID_SIDE  # [mm] distance of neighbouring tubes in a layer
+    front_to_back_up_distance = (
+        c.FRONT_TO_BACK_IN_PLANE
+    )  # [mm] front->back layer shift in the tube plane (18.84)
+    front_to_back_in_distance = (
+        c.FRONT_TO_BACK_NORMAL
+    )  # [mm] front->back layer shift along the normal (78.78)
+
+    def __init__(
+        self,
+        calibration_bank_data,
+        is_upside_down_bank,
+        tubes_per_layer,
+        tube_length,
+        straw_pixel_number,
+        use_pixel_centre_position=True,
+        bank_id=None,
+    ):
         self.bank_id = bank_id
         self.is_upside_down_bank = is_upside_down_bank
         self.tubes_per_layer = tubes_per_layer
-        self.tube_length = tube_length #could also be called straw_length
+        self.tube_length = tube_length  # could also be called straw_length
         self.straw_pixel_number = straw_pixel_number
         self.pixel_size = self.tube_length / self.straw_pixel_number
-        self.quality = {} # quality indicators of the input data and of the fit (see print_quality_report)
+        self.quality = {}  # quality indicators of the input data and of the fit (see print_quality_report)
 
         self._calculate_corner_positions(calibration_bank_data, use_pixel_centre_position)
         self._check_reproduction_of_input()
@@ -417,12 +522,18 @@ class Bank:
         # --- Step 1: the input tubes, ordered by local tube id --------------
         # tube_a = the tube with the lower id (closer to tube 0), tube_b = the other
         tube_a, tube_b = sorted(calibration_bank_data["positions"], key=lambda pos: pos["tube_id"])
-        self.input_tubes = [] # kept for the quality checks
+        self.input_tubes = []  # kept for the quality checks
         for tube in (tube_a, tube_b):
             first = np.array(tube["first_pixel_end"], dtype=float)
             last = np.array(tube["last_pixel_end"], dtype=float)
-            self.input_tubes.append({"tube_id": tube["tube_id"], "first": first, "last": last,
-                                     "mid": (first + last) / 2})
+            self.input_tubes.append(
+                {
+                    "tube_id": tube["tube_id"],
+                    "first": first,
+                    "last": last,
+                    "mid": (first + last) / 2,
+                }
+            )
         ta, tb = self.input_tubes
 
         # --- Step 2: direction along the tubes = average of the 2 tubes ------
@@ -431,7 +542,9 @@ class Bank:
         # effect of the measurement uncertainty of the end points.
         dir_a = _unit(ta["first"] - ta["last"])
         dir_b = _unit(tb["first"] - tb["last"])
-        self.quality["tube_angle_deg"] = np.degrees(np.arccos(np.clip(np.dot(dir_a, dir_b), -1.0, 1.0)))
+        self.quality["tube_angle_deg"] = np.degrees(
+            np.arccos(np.clip(np.dot(dir_a, dir_b), -1.0, 1.0))
+        )
         u = _unit(dir_a + dir_b)
 
         # --- Step 3: least-squares plane through the 4 points ----------------
@@ -443,7 +556,7 @@ class Bank:
         centroid = points.mean(axis=0)
         _, _, vt = np.linalg.svd(points - centroid)
         plane_normal = vt[2]
-        self.quality["plane_residuals"] = (points - centroid) @ plane_normal # signed [mm]
+        self.quality["plane_residuals"] = (points - centroid) @ plane_normal  # signed [mm]
 
         # --- Step 4: put the tube direction exactly into the fitted plane ----
         u = _unit(u - np.dot(u, plane_normal) * plane_normal)
@@ -478,27 +591,40 @@ class Bank:
         # along = offset of the 2 tubes along the tube direction, across = the
         # tube spacing does not match N*pitch, normal = out of plane (0 by construction)
         difference = prediction_a - prediction_b
-        self.quality["tube0_prediction_difference"] = np.array([np.dot(difference, u), np.dot(difference, w), np.dot(difference, n)])
+        self.quality["tube0_prediction_difference"] = np.array(
+            [np.dot(difference, u), np.dot(difference, w), np.dot(difference, n)]
+        )
         # measured tube spacing in units of the pitch (should be integer = id difference)
         d = tb["mid"] - ta["mid"]
-        self.quality["spacing_in_pitches"] = np.linalg.norm(d - np.dot(d, u) * u) / self.tube_tube_distance
+        self.quality["spacing_in_pitches"] = (
+            np.linalg.norm(d - np.dot(d, u) * u) / self.tube_tube_distance
+        )
 
         # --- Step 8: the 8 corners (unchanged logic from here) ---------------
-        front_top_tube_end = tube0_mid + u * self.tube_length / 2 # first pixel end of tube 0, front layer
+        front_top_tube_end = (
+            tube0_mid + u * self.tube_length / 2
+        )  # first pixel end of tube 0, front layer
 
-        top_to_bottom_vector = - self.vector_perpendicular_tubes * (self.tubes_per_layer -1) * self.tube_tube_distance
-        front_to_back_vector = self.vector_perpendicular_layers * self.front_to_back_in_distance + (self.vector_perpendicular_tubes * self.front_to_back_up_distance if not self.is_upside_down_bank else -self.vector_perpendicular_tubes * self.front_to_back_up_distance) #TODO clean this!
+        top_to_bottom_vector = (
+            -self.vector_perpendicular_tubes * (self.tubes_per_layer - 1) * self.tube_tube_distance
+        )
+        front_to_back_vector = self.vector_perpendicular_layers * self.front_to_back_in_distance + (
+            self.vector_perpendicular_tubes * self.front_to_back_up_distance
+            if not self.is_upside_down_bank
+            else -self.vector_perpendicular_tubes * self.front_to_back_up_distance
+        )  # TODO clean this!
 
         back_top_tube_end = front_top_tube_end + front_to_back_vector
         front_bottom_tube_end = front_top_tube_end + top_to_bottom_vector
         back_bottom_tube_end = front_bottom_tube_end + front_to_back_vector
 
-        self.positionA = np.array([
+        self.positionA = np.array(
+            [
                 front_top_tube_end,  # top tube in first layer
                 back_top_tube_end,  # top tube in last (4th) layer
-                front_bottom_tube_end, # bottom tube in first layer
-                back_bottom_tube_end  # bottom tube in last (4th) layer
-                ]
+                front_bottom_tube_end,  # bottom tube in first layer
+                back_bottom_tube_end,  # bottom tube in last (4th) layer
+            ]
         )
         # last pixel ends of the 4 corner tubes (straw ends)
         self.positionB = self.positionA - self.vector_along_tubes * self.tube_length
@@ -524,18 +650,36 @@ class Bank:
         instead of straw ends, or the end electronics of the measured tubes);
         the length difference (input length - effective straw length) is
         reported separately."""
-        half_pixel = self.vector_along_tubes * self.pixel_size / 2 if self.positions_are_pixel_centres else 0.0
-        top_first = self.positionA[0] + half_pixel      # back to the straw end
+        half_pixel = (
+            self.vector_along_tubes * self.pixel_size / 2
+            if self.positions_are_pixel_centres
+            else 0.0
+        )
+        top_first = self.positionA[0] + half_pixel  # back to the straw end
         bottom_first = self.positionA[2] + half_pixel
         step = (bottom_first - top_first) / (self.tubes_per_layer - 1)
-        basis = np.array([self.vector_along_tubes, self.vector_perpendicular_tubes, self.vector_perpendicular_layers])
+        basis = np.array(
+            [
+                self.vector_along_tubes,
+                self.vector_perpendicular_tubes,
+                self.vector_perpendicular_layers,
+            ]
+        )
         residuals = []
         for tube in self.input_tubes:
             predicted_first = top_first + step * tube["tube_id"]
             predicted_mid = predicted_first - self.vector_along_tubes * self.tube_length / 2
             input_length = np.linalg.norm(tube["first"] - tube["last"])
-            residuals.append((tube["tube_id"], basis @ (tube["mid"] - predicted_mid), input_length - self.tube_length))
-        self.quality["reproduction_residuals"] = residuals # [(tube_id, [along, across, normal], length difference)]
+            residuals.append(
+                (
+                    tube["tube_id"],
+                    basis @ (tube["mid"] - predicted_mid),
+                    input_length - self.tube_length,
+                )
+            )
+        self.quality["reproduction_residuals"] = (
+            residuals  # [(tube_id, [along, across, normal], length difference)]
+        )
 
     def _calculate_sample_bank_distance(self, use_pixel_centre_position):
         """Calculates the distance from the sample to the bank.
@@ -546,13 +690,17 @@ class Bank:
 
         # calculate as the average of the 4 front corner positions (the same
         # for pixel centres and straw ends, as both are symmetric along the tubes)
-        centre_at_front_layer_tube_centre = (self.positionA[0] + self.positionA[2] + self.positionB[0] + self.positionB[2]) / 4
+        centre_at_front_layer_tube_centre = (
+            self.positionA[0] + self.positionA[2] + self.positionB[0] + self.positionB[2]
+        ) / 4
 
-        #move to the front face from the tube centre plane
-        bank_front_face_position = centre_at_front_layer_tube_centre - self.vector_perpendicular_layers * c.TUBE_OUTER_RADIUS  # normal points away from the sample
+        # move to the front face from the tube centre plane
+        bank_front_face_position = (
+            centre_at_front_layer_tube_centre
+            - self.vector_perpendicular_layers * c.TUBE_OUTER_RADIUS
+        )  # normal points away from the sample
         self.front_face_centre = bank_front_face_position
         self.sample_bank_distance = np.linalg.norm(bank_front_face_position)
-
 
 
 def _unit(vector):
@@ -562,18 +710,36 @@ def _unit(vector):
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Calculate the 8 corner positions of the LOKI detector banks from calibration data.")
-    parser.add_argument("--data", choices=["measured", "reference", "example"], default="measured",
-                        help="calibration input: survey measurement (SAM-606), the intended geometry "
-                             "(REFERENCE_BANKS_DATA) or the Geant4 example data (default: measured)")
-    parser.add_argument("--sample-to-window-distance", type=float, default=None,
-                        help="[mm] sample to tank window distance for the measured data "
-                             "(default: the value in survey.py)")
+
+    parser = argparse.ArgumentParser(
+        description="Calculate the 8 corner positions of the LOKI detector banks from calibration data."
+    )
+    parser.add_argument(
+        "--data",
+        choices=["measured", "reference", "example"],
+        default="measured",
+        help="calibration input: survey measurement (SAM-606), the intended geometry "
+        "(REFERENCE_BANKS_DATA) or the Geant4 example data (default: measured)",
+    )
+    parser.add_argument(
+        "--sample-to-window-distance",
+        type=float,
+        default=None,
+        help="[mm] sample to tank window distance for the measured data "
+        "(default: the value in survey.py)",
+    )
     parser.add_argument("--verbose", action="store_true", help="print the quality report")
-    parser.add_argument("--compare-to-intended", action="store_true",
-                        help="compare the corners with the intended geometry (REFERENCE_BANKS_DATA)")
-    parser.add_argument("--print", dest="print_data", action="store_true",
-                        help="print the corner data (straw ends) in the REFERENCE_BANKS_DATA / det_banks_data format")
+    parser.add_argument(
+        "--compare-to-intended",
+        action="store_true",
+        help="compare the corners with the intended geometry (REFERENCE_BANKS_DATA)",
+    )
+    parser.add_argument(
+        "--print",
+        dest="print_data",
+        action="store_true",
+        help="print the corner data (straw ends) in the REFERENCE_BANKS_DATA / det_banks_data format",
+    )
     args = parser.parse_args()
 
     if args.data == "reference":
@@ -585,8 +751,15 @@ def main():
     else:
         print("Using the survey measurement (SAM-606) as calibration data")
         from .survey import SAMPLE_TO_TANK_WINDOW_DISTANCE, get_measured_calibration_data
-        distance = SAMPLE_TO_TANK_WINDOW_DISTANCE if args.sample_to_window_distance is None else args.sample_to_window_distance
-        calibration_data = get_measured_calibration_data(sample_to_window_distance=distance, verbose=args.verbose)
+
+        distance = (
+            SAMPLE_TO_TANK_WINDOW_DISTANCE
+            if args.sample_to_window_distance is None
+            else args.sample_to_window_distance
+        )
+        calibration_data = get_measured_calibration_data(
+            sample_to_window_distance=distance, verbose=args.verbose
+        )
 
     detectors = Detectors(calibration_data, use_pixel_centre_position=True, verbose=args.verbose)
 

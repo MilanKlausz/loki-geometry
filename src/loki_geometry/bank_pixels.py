@@ -130,6 +130,7 @@ STRAW_POSITIONS_PACK_FRAME = _rotate_2d(_STRAW_POSITIONS_TUBE_FRAME, _STRAW_PATT
 # Bank frame from the 8 corners
 # ---------------------------------------------------------------------------
 
+
 def _unit(vector):
     return vector / np.linalg.norm(vector)
 
@@ -154,6 +155,7 @@ class BankFrame:
     mirrored:     True if the packs are mounted upside down (mirrored bank)
     rows:         tubes per layer
     """
+
     origin: np.ndarray
     along: np.ndarray
     straw_length: float
@@ -177,17 +179,29 @@ class BankFrame:
         layer_step = (a[1] - a[0]) / (LAYERS_PER_BANK - 1)
         # orthonormal (row, depth) frame perpendicular to the straws
         row_axis = _unit(row_step - np.dot(row_step, along) * along)
-        depth = layer_step - np.dot(layer_step, along) * along - np.dot(layer_step, row_axis) * row_axis
+        depth = (
+            layer_step - np.dot(layer_step, along) * along - np.dot(layer_step, row_axis) * row_axis
+        )
         depth_axis = _unit(depth)
         # the layers are shifted towards higher tube ids only in mirrored banks
         mirrored = bool(np.dot(layer_step, row_axis) > 0)
-        return cls(a[0], along, float(np.linalg.norm(straw_vector)), row_step, layer_step,
-                   row_axis, depth_axis, mirrored, rows)
+        return cls(
+            a[0],
+            along,
+            float(np.linalg.norm(straw_vector)),
+            row_step,
+            layer_step,
+            row_axis,
+            depth_axis,
+            mirrored,
+            rows,
+        )
 
 
 # ---------------------------------------------------------------------------
 # Offsets of tubes, straws and pixels (relative to BankFrame.origin)
 # ---------------------------------------------------------------------------
+
 
 def tube_offsets(frame):
     """Tube axis offsets from the origin, shape (4 * rows, 3), in tube id order
@@ -212,7 +226,9 @@ def pixel_reference_fraction(pixel_reference):
     """Position of the pixel reference point within the pixel, as a fraction of
     the pixel length from the pixel's first face: 0.5 (centre) or 0 (base)."""
     if pixel_reference not in PIXEL_REFERENCES:
-        raise ValueError(f"pixel_reference must be one of {PIXEL_REFERENCES}, not {pixel_reference!r}")
+        raise ValueError(
+            f"pixel_reference must be one of {PIXEL_REFERENCES}, not {pixel_reference!r}"
+        )
     return _PIXEL_REFERENCE_FRACTION[pixel_reference]
 
 
@@ -221,16 +237,20 @@ def pixel_offsets_along_straw(frame, pixels_per_straw, pixel_reference=PIXEL_CEN
     straw, shape (N, 3): the pixel centres ((k + 0.5) * L / N) or the pixel
     bases (k * L / N), see the module docstring."""
     pixel_length = frame.straw_length / pixels_per_straw
-    positions = (np.arange(pixels_per_straw) + pixel_reference_fraction(pixel_reference)) * pixel_length
+    positions = (
+        np.arange(pixels_per_straw) + pixel_reference_fraction(pixel_reference)
+    ) * pixel_length
     return positions[:, None] * frame.along
 
 
 def local_pixel_offsets(frame, pixels_per_straw, pixel_reference=PIXEL_CENTRE):
     """Offsets of the reference points of all pixels of a bank from its origin
     (corner A[0]), shape (tubes * 7 * N, 3), in pixel id order (tube, straw, pixel)."""
-    offsets = (tube_offsets(frame)[:, None, None, :]
-               + straw_offsets(frame)[None, :, None, :]
-               + pixel_offsets_along_straw(frame, pixels_per_straw, pixel_reference)[None, None, :, :])
+    offsets = (
+        tube_offsets(frame)[:, None, None, :]
+        + straw_offsets(frame)[None, :, None, :]
+        + pixel_offsets_along_straw(frame, pixels_per_straw, pixel_reference)[None, None, :, :]
+    )
     return offsets.reshape(-1, 3)
 
 
@@ -238,16 +258,21 @@ def local_pixel_offsets(frame, pixels_per_straw, pixel_reference=PIXEL_CENTRE):
 # Pixel ids
 # ---------------------------------------------------------------------------
 
+
 def pixels_in_bank(bank_id, pixels_per_straw=DEFAULT_PIXELS_PER_STRAW):
     return TUBES_PER_BANK[bank_id] * STRAWS_PER_TUBE * pixels_per_straw
 
 
-def bank_first_pixel_id(bank_id, pixels_per_straw=DEFAULT_PIXELS_PER_STRAW, first_pixel_id=FIRST_PIXEL_ID):
+def bank_first_pixel_id(
+    bank_id, pixels_per_straw=DEFAULT_PIXELS_PER_STRAW, first_pixel_id=FIRST_PIXEL_ID
+):
     """detector_number of the first pixel of a bank (banks are numbered consecutively)."""
     return first_pixel_id + sum(pixels_in_bank(b, pixels_per_straw) for b in range(bank_id))
 
 
-def bank_pixel_ids(bank_id, pixels_per_straw=DEFAULT_PIXELS_PER_STRAW, first_pixel_id=FIRST_PIXEL_ID):
+def bank_pixel_ids(
+    bank_id, pixels_per_straw=DEFAULT_PIXELS_PER_STRAW, first_pixel_id=FIRST_PIXEL_ID
+):
     """detector_number values of a bank, in the order of local_pixel_offsets."""
     start = bank_first_pixel_id(bank_id, pixels_per_straw, first_pixel_id)
     return np.arange(start, start + pixels_in_bank(bank_id, pixels_per_straw), dtype=np.int64)
@@ -257,12 +282,14 @@ def bank_pixel_ids(bank_id, pixels_per_straw=DEFAULT_PIXELS_PER_STRAW, first_pix
 # Whole bank / instrument
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class BankPixels:
     """Pixel data of one bank: the bank position (the origin of the local
     offsets = corner A[0], the first pixel end of tube 0 on its axis), the
     detector numbers and the local offsets of the pixel reference points [mm]
     (pixel centres or pixel bases, see pixel_reference)."""
+
     bank_id: int
     frame: BankFrame
     pixels_per_straw: int
@@ -291,21 +318,40 @@ class BankPixels:
         return self.positions + shift * self.frame.along
 
 
-def compute_bank_pixels(bank_id, corners, pixels_per_straw=DEFAULT_PIXELS_PER_STRAW,
-                        first_pixel_id=FIRST_PIXEL_ID, pixel_reference=PIXEL_CENTRE):
+def compute_bank_pixels(
+    bank_id,
+    corners,
+    pixels_per_straw=DEFAULT_PIXELS_PER_STRAW,
+    first_pixel_id=FIRST_PIXEL_ID,
+    pixel_reference=PIXEL_CENTRE,
+):
     """Pixel data of a bank from its corners (REFERENCE_BANKS_DATA format)."""
     rows = tubes_per_layer(bank_id)
     if "num_tubes" in corners and corners["num_tubes"] != TUBES_PER_BANK[bank_id]:
-        raise ValueError(f"bank {bank_id}: num_tubes {corners['num_tubes']} != {TUBES_PER_BANK[bank_id]}")
+        raise ValueError(
+            f"bank {bank_id}: num_tubes {corners['num_tubes']} != {TUBES_PER_BANK[bank_id]}"
+        )
     frame = BankFrame.from_corners(corners, rows)
-    return BankPixels(bank_id, frame, pixels_per_straw,
-                      bank_pixel_ids(bank_id, pixels_per_straw, first_pixel_id),
-                      local_pixel_offsets(frame, pixels_per_straw, pixel_reference),
-                      pixel_reference)
+    return BankPixels(
+        bank_id,
+        frame,
+        pixels_per_straw,
+        bank_pixel_ids(bank_id, pixels_per_straw, first_pixel_id),
+        local_pixel_offsets(frame, pixels_per_straw, pixel_reference),
+        pixel_reference,
+    )
 
 
-def compute_instrument_pixels(corners_by_bank, pixels_per_straw=DEFAULT_PIXELS_PER_STRAW,
-                              first_pixel_id=FIRST_PIXEL_ID, pixel_reference=PIXEL_CENTRE):
+def compute_instrument_pixels(
+    corners_by_bank,
+    pixels_per_straw=DEFAULT_PIXELS_PER_STRAW,
+    first_pixel_id=FIRST_PIXEL_ID,
+    pixel_reference=PIXEL_CENTRE,
+):
     """Pixel data of all banks in corners_by_bank ({bank_id: corners}), as {bank_id: BankPixels}."""
-    return {bank_id: compute_bank_pixels(bank_id, corners, pixels_per_straw, first_pixel_id, pixel_reference)
-            for bank_id, corners in sorted(corners_by_bank.items())}
+    return {
+        bank_id: compute_bank_pixels(
+            bank_id, corners, pixels_per_straw, first_pixel_id, pixel_reference
+        )
+        for bank_id, corners in sorted(corners_by_bank.items())
+    }

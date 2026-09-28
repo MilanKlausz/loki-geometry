@@ -1,4 +1,5 @@
 """Tests of the pixel geometry derived from the 8 bank corners."""
+
 import numpy as np
 import pytest
 
@@ -15,6 +16,7 @@ def geant4_corners():
 
 
 # --- straw pattern ----------------------------------------------------------
+
 
 def test_straw_pattern_is_a_hexagon_around_the_centre_straw():
     pattern = lbp.STRAW_POSITIONS_PACK_FRAME
@@ -35,11 +37,15 @@ def test_straw_offsets_match_geant4(bank_id, geant4_corners):
 
 # --- bank frame ---------------------------------------------------------------
 
+
 @pytest.mark.parametrize("corner_source", ["reference", "geant4"])
 def test_mirrored_banks_are_derived_from_the_corners(corner_source, geant4_corners):
     corners = REFERENCE_BANKS_DATA if corner_source == "reference" else geant4_corners
-    mirrored = {b for b in ALL_BANKS
-                if lbp.BankFrame.from_corners(corners[b], lbp.tubes_per_layer(b)).mirrored}
+    mirrored = {
+        b
+        for b in ALL_BANKS
+        if lbp.BankFrame.from_corners(corners[b], lbp.tubes_per_layer(b)).mirrored
+    }
     assert mirrored == set(lbp.MIRRORED_BANK_IDS)
 
 
@@ -59,14 +65,21 @@ def test_invalid_corners_raise():
 
 # --- offsets ------------------------------------------------------------------
 
+
 def test_tube_order_is_layer_major():
     frame = lbp.BankFrame.from_corners(REFERENCE_BANKS_DATA[3], lbp.tubes_per_layer(3))
     tubes = lbp.tube_offsets(frame)
     rows = frame.rows
     assert tubes.shape == (4 * rows, 3)
     assert np.allclose(tubes[0], 0.0)
-    assert np.allclose(tubes[rows - 1], np.subtract(REFERENCE_BANKS_DATA[3]["A"][2], REFERENCE_BANKS_DATA[3]["A"][0]))
-    assert np.allclose(tubes[3 * rows], np.subtract(REFERENCE_BANKS_DATA[3]["A"][1], REFERENCE_BANKS_DATA[3]["A"][0]))
+    assert np.allclose(
+        tubes[rows - 1],
+        np.subtract(REFERENCE_BANKS_DATA[3]["A"][2], REFERENCE_BANKS_DATA[3]["A"][0]),
+    )
+    assert np.allclose(
+        tubes[3 * rows],
+        np.subtract(REFERENCE_BANKS_DATA[3]["A"][1], REFERENCE_BANKS_DATA[3]["A"][0]),
+    )
 
 
 def test_pixels_are_centred_in_equal_parts_of_the_straw():
@@ -77,6 +90,7 @@ def test_pixels_are_centred_in_equal_parts_of_the_straw():
 
 
 # --- whole banks ----------------------------------------------------------------
+
 
 @pytest.mark.parametrize("bank_id", ALL_BANKS)
 def test_all_pixels_reproduce_geant4_exactly(bank_id, geant4_corners):
@@ -100,6 +114,7 @@ def test_reference_corners_are_close_to_geant4():
 
 # --- pixel ids -------------------------------------------------------------------
 
+
 def test_pixel_ids_are_consecutive_over_the_instrument():
     ids = np.concatenate([lbp.bank_pixel_ids(b) for b in ALL_BANKS])
     assert ids[0] == 1
@@ -109,19 +124,27 @@ def test_pixel_ids_are_consecutive_over_the_instrument():
 @pytest.mark.parametrize("pixels_per_straw", [256, 512])
 def test_bank_first_pixel_ids_match_geant4(pixels_per_straw):
     for bank_id in ALL_BANKS:
-        assert lbp.bank_first_pixel_id(bank_id, pixels_per_straw) == g4.bank_pixel_offset(bank_id, pixels_per_straw) + 1
+        assert (
+            lbp.bank_first_pixel_id(bank_id, pixels_per_straw)
+            == g4.bank_pixel_offset(bank_id, pixels_per_straw) + 1
+        )
 
 
 def test_compute_instrument_pixels_returns_all_banks_in_order():
-    pixels = lbp.compute_instrument_pixels({4: REFERENCE_BANKS_DATA[4], 1: REFERENCE_BANKS_DATA[1]}, 2)
+    pixels = lbp.compute_instrument_pixels(
+        {4: REFERENCE_BANKS_DATA[4], 1: REFERENCE_BANKS_DATA[1]}, 2
+    )
     assert list(pixels) == [1, 4]
     assert len(pixels[4].offsets) == len(pixels[4].pixel_ids) == 48 * 7 * 2
 
 
 # --- pixel reference point ---------------------------------------------------------
 
+
 def test_pixel_base_offsets_are_half_a_pixel_before_the_centres():
-    centre = lbp.compute_bank_pixels(7, REFERENCE_BANKS_DATA[7], 4, pixel_reference=lbp.PIXEL_CENTRE)
+    centre = lbp.compute_bank_pixels(
+        7, REFERENCE_BANKS_DATA[7], 4, pixel_reference=lbp.PIXEL_CENTRE
+    )
     base = lbp.compute_bank_pixels(7, REFERENCE_BANKS_DATA[7], 4, pixel_reference=lbp.PIXEL_BASE)
     half_pixel = centre.frame.along * centre.pixel_length / 2
     assert np.allclose(base.offsets, centre.offsets - half_pixel)

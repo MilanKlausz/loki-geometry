@@ -57,7 +57,8 @@ from . import constants as c
 MEASUREMENT_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "data",
-    "ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt")
+    "ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt",
+)
 
 # Distance [mm] along the beam from the nominal sample position to the origin
 # of the survey's TANK WINDOW coordinate system (window is downstream of the
@@ -81,33 +82,33 @@ SAMPLE_TO_TANK_WINDOW_DISTANCE = 100.0  # [mm]
 # it every time the module runs).
 TUBE_LABEL_MAP = {
     # --- middle carriage (C2) ---
-    "C2UP16": (1, 0),   # mid top, topmost tube (1st of 16 rows)
-    "C2UP3":  (1, 13),  # mid top, 3rd tube from the bottom
-    "C2LP16": (2, 0),   # mid left, leftmost (outermost) tube
-    "C2LP1":  (2, 11),  # mid left, rightmost (innermost) tube, 12th of 12
-    "C2DP1":  (3, 0),   # mid bottom, topmost (innermost) tube
+    "C2UP16": (1, 0),  # mid top, topmost tube (1st of 16 rows)
+    "C2UP3": (1, 13),  # mid top, 3rd tube from the bottom
+    "C2LP16": (2, 0),  # mid left, leftmost (outermost) tube
+    "C2LP1": (2, 11),  # mid left, rightmost (innermost) tube, 12th of 12
+    "C2DP1": (3, 0),  # mid bottom, topmost (innermost) tube
     "C2DP16": (3, 15),  # mid bottom, bottom tube, 16th of 16
-    "C2RP1":  (4, 0),   # mid right, leftmost (innermost) tube
+    "C2RP1": (4, 0),  # mid right, leftmost (innermost) tube
     "C2RP16": (4, 11),  # mid right, rightmost (outermost) tube, 12th of 12
     # --- front carriage (C1) ---
     # Front top: the "C1UP8" label is used for points of TWO different tubes:
     # C1UP8I is on tube "UP9" (local id 19), C1UP8II is on tube "UP8" (local
     # id 20). C1UP8II is replaced by an extrapolated end of tube UP9 early on
     # (see fix_bank5_mislabelled_tube), so after that "C1UP8" means tube UP9.
-    "C1UP8":  (5, 19),  # front top, tube "UP9" (9th from bottom of 28 rows)
-    "C1UP3":  (5, 25),  # front top, 3rd tube from the bottom
+    "C1UP8": (5, 19),  # front top, tube "UP9" (9th from bottom of 28 rows)
+    "C1UP3": (5, 25),  # front top, 3rd tube from the bottom
     "C1LP11": (6, 21),  # front left, 22nd tube from the left (of 32)
-    "C1LP1":  (6, 31),  # front left, rightmost (innermost) tube
-    "C1DP1":  (7, 0),   # front bottom, topmost (innermost) tube
+    "C1LP1": (6, 31),  # front left, rightmost (innermost) tube
+    "C1DP1": (7, 0),  # front bottom, topmost (innermost) tube
     "C1DP31": (7, 18),  # front bottom, 19th tube of 20 (label "31" is misleading)
-    "C1RP1":  (8, 0),   # front right, leftmost (innermost) tube
+    "C1RP1": (8, 0),  # front right, leftmost (innermost) tube
     "C1RP11": (8, 10),  # front right, 11th tube from the left (of 32)
 }
 
 # Tolerances of the sanity checks (only warnings are printed, nothing stops)
-PARALLEL_TOLERANCE_DEG = 0.5      # max angle between the 2 tubes of a bank
-TUBE_ID_TOLERANCE = 0.25          # [tube pitch] allowed deviation from integer
-EXCESS_LENGTH_RANGE = (20., 40.)  # [mm] expected measured - effective length
+PARALLEL_TOLERANCE_DEG = 0.5  # max angle between the 2 tubes of a bank
+TUBE_ID_TOLERANCE = 0.25  # [tube pitch] allowed deviation from integer
+EXCESS_LENGTH_RANGE = (20.0, 40.0)  # [mm] expected measured - effective length
 
 
 def _calibration_constants():
@@ -122,6 +123,7 @@ def _calibration_constants():
 # ---------------------------------------------------------------------------
 # Step 1: read the file and convert to our coordinate frame
 # ---------------------------------------------------------------------------
+
 
 def read_measured_points(filename=MEASUREMENT_FILE):
     """Read the survey txt file into {label: np.array([X, Y, Z])} (survey frame).
@@ -160,6 +162,7 @@ def survey_to_nexus_frame(point, sample_to_window_distance):
 # Step 2: fix the bank 5 (front top) mislabelled measurement
 # ---------------------------------------------------------------------------
 
+
 def fix_bank5_mislabelled_tube(points, tube_tube_distance):
     """In bank 5 the two "C1UP8" points belong to two different tubes:
     C1UP8I is the start of tube UP9, C1UP8II is the end of tube UP8.
@@ -181,9 +184,11 @@ def fix_bank5_mislabelled_tube(points, tube_tube_distance):
     # tube pitch (28.4 mm) away from the extrapolated end of UP9.
     discarded = points["C1UP8II"]
     separation = np.linalg.norm(discarded - up9_end)
-    print(f"Bank 5 fix: C1UP8II replaced by the extrapolated end of tube UP9. "
-          f"Distance of the discarded point (tube UP8) from it: {separation:.1f} mm "
-          f"(expected ~{tube_tube_distance} mm = 1 tube pitch)")
+    print(
+        f"Bank 5 fix: C1UP8II replaced by the extrapolated end of tube UP9. "
+        f"Distance of the discarded point (tube UP8) from it: {separation:.1f} mm "
+        f"(expected ~{tube_tube_distance} mm = 1 tube pitch)"
+    )
     if abs(separation - tube_tube_distance) > TUBE_ID_TOLERANCE * tube_tube_distance:
         print("  WARNING: that is not ~1 tube pitch, check the bank 5 assumption!")
 
@@ -194,6 +199,7 @@ def fix_bank5_mislabelled_tube(points, tube_tube_distance):
 # ---------------------------------------------------------------------------
 # Step 3: group the points into tubes and decide which end is which
 # ---------------------------------------------------------------------------
+
 
 def group_points_into_tubes(points, vertical_bank_ids):
     """Group the I/II end points by tube and bank.
@@ -218,20 +224,23 @@ def group_points_into_tubes(points, vertical_bank_ids):
         if not I_is_A:
             print(f"Note: for {label} the II point is the A (low pixel id) end.")
         banks.setdefault(bank_id, []).append(
-            {"label": label, "tube_id": tube_id, "end_A": end_A, "end_B": end_B})
+            {"label": label, "tube_id": tube_id, "end_A": end_A, "end_B": end_B}
+        )
 
     # Order the two tubes of each bank by tube id (not required, just tidy)
     for bank_id in banks:
         banks[bank_id].sort(key=lambda tube: tube["tube_id"])
         if len(banks[bank_id]) != 2:
-            raise ValueError(f"Bank {bank_id}: expected 2 measured tubes, "
-                             f"got {len(banks[bank_id])}")
+            raise ValueError(
+                f"Bank {bank_id}: expected 2 measured tubes, got {len(banks[bank_id])}"
+            )
     return banks
 
 
 # ---------------------------------------------------------------------------
 # Step 4: sanity checks on the measured (still untrimmed) tubes
 # ---------------------------------------------------------------------------
+
 
 def _unit(v):
     return v / np.linalg.norm(v)
@@ -266,8 +275,10 @@ def check_tube_spacing(banks, tube_tube_distance):
         steps = np.linalg.norm(d_perp) / tube_tube_distance
         expected = abs(t2["tube_id"] - t1["tube_id"])
         flag = "" if abs(steps - expected) < TUBE_ID_TOLERANCE else "  WARNING: mismatch!"
-        print(f"  bank {bank_id}: {steps:.2f} pitches (assigned tube ids "
-              f"{t1['tube_id']} and {t2['tube_id']} -> {expected}){flag}")
+        print(
+            f"  bank {bank_id}: {steps:.2f} pitches (assigned tube ids "
+            f"{t1['tube_id']} and {t2['tube_id']} -> {expected}){flag}"
+        )
 
 
 def check_tube_ids_against_nominal(banks, vertical_bank_ids, tube_tube_distance):
@@ -277,24 +288,32 @@ def check_tube_ids_against_nominal(banks, vertical_bank_ids, tube_tube_distance)
     the bank plane (y for horizontal, x for vertical banks) is used, which is
     insensitive to the bank shifts along the beam (z) seen in the survey."""
     from .reference_data import REFERENCE_BANKS_DATA
+
     print("\nTube id estimated from the nominal geometry (front layer):")
     for bank_id, tubes in sorted(banks.items()):
         ref = REFERENCE_BANKS_DATA[bank_id]
-        top = np.array(ref["A"][0], dtype=float)     # front layer, tube 0
+        top = np.array(ref["A"][0], dtype=float)  # front layer, tube 0
         bottom = np.array(ref["A"][2], dtype=float)  # front layer, last tube
         step = _unit(bottom - top) * tube_tube_distance  # one tube pitch
         axis = 0 if bank_id in vertical_bank_ids else 1  # transverse coordinate
         for tube in tubes:
             mid = (tube["end_A"] + tube["end_B"]) / 2
             estimated = (mid[axis] - top[axis]) / step[axis]
-            flag = "" if abs(estimated - tube["tube_id"]) < TUBE_ID_TOLERANCE else "  WARNING: mismatch!"
-            print(f"  bank {bank_id} {tube['label']:7s}: estimated {estimated:6.2f}, "
-                  f"assigned {tube['tube_id']}{flag}")
+            flag = (
+                ""
+                if abs(estimated - tube["tube_id"]) < TUBE_ID_TOLERANCE
+                else "  WARNING: mismatch!"
+            )
+            print(
+                f"  bank {bank_id} {tube['label']:7s}: estimated {estimated:6.2f}, "
+                f"assigned {tube['tube_id']}{flag}"
+            )
 
 
 # ---------------------------------------------------------------------------
 # Step 5: remove the extra length of the end electronics
 # ---------------------------------------------------------------------------
+
 
 def find_effective_tube_ends(end_A, end_B, effective_length):
     """Return the effective straw end positions of a tube, given two points on
@@ -335,6 +354,7 @@ def adjust_calibration_data_to_effective_tube_lengths(calibration_data, verbose=
     which this symmetric adjustment does not change, so it is only needed when
     the straw end positions themselves are wanted."""
     import copy
+
     tube_length_by_bank = _calibration_constants()["tube_length_by_bank"]
     adjusted = copy.deepcopy(calibration_data)  # don't modify the input
     for bank_data in adjusted:
@@ -344,11 +364,14 @@ def adjust_calibration_data_to_effective_tube_lengths(calibration_data, verbose=
             first = np.array(pos["first_pixel_end"], dtype=float)
             last = np.array(pos["last_pixel_end"], dtype=float)
             eff_first, eff_last, input_length, excess = find_effective_tube_ends(
-                first, last, effective_length)
+                first, last, effective_length
+            )
             if verbose:
-                print(f"bank {bank_id} tube {pos['tube_id']}: {input_length:.2f} mm -> "
-                      f"{effective_length} mm ({'shortened' if excess > 0 else 'stretched'} "
-                      f"by {abs(excess):.2f} mm)")
+                print(
+                    f"bank {bank_id} tube {pos['tube_id']}: {input_length:.2f} mm -> "
+                    f"{effective_length} mm ({'shortened' if excess > 0 else 'stretched'} "
+                    f"by {abs(excess):.2f} mm)"
+                )
             pos["first_pixel_end"] = [float(v) for v in eff_first]
             pos["last_pixel_end"] = [float(v) for v in eff_last]
             pos["distance"] = float(np.linalg.norm(eff_last - eff_first))
@@ -359,9 +382,12 @@ def adjust_calibration_data_to_effective_tube_lengths(calibration_data, verbose=
 # Main function
 # ---------------------------------------------------------------------------
 
-def get_measured_calibration_data(filename=MEASUREMENT_FILE,
-                                  sample_to_window_distance=SAMPLE_TO_TANK_WINDOW_DISTANCE,
-                                  verbose=True):
+
+def get_measured_calibration_data(
+    filename=MEASUREMENT_FILE,
+    sample_to_window_distance=SAMPLE_TO_TANK_WINDOW_DISTANCE,
+    verbose=True,
+):
     """Full chain: read -> fix bank 5 -> convert frame -> group into tubes ->
     sanity checks -> trim the tube ends -> calibration data list."""
     constants = _calibration_constants()
@@ -370,11 +396,15 @@ def get_measured_calibration_data(filename=MEASUREMENT_FILE,
     tube_tube_distance = constants["tube_tube_distance"]
 
     if sample_to_window_distance == 0.0:
-        print("WARNING: sample to tank window distance is 0 -> positions are "
-              "relative to the tank window, not to the sample!")
+        print(
+            "WARNING: sample to tank window distance is 0 -> positions are "
+            "relative to the tank window, not to the sample!"
+        )
     elif verbose:
-        print(f"NOTE: using sample to tank window distance {sample_to_window_distance} mm "
-              f"(provisional, see SAMPLE_TO_TANK_WINDOW_DISTANCE)")
+        print(
+            f"NOTE: using sample to tank window distance {sample_to_window_distance} mm "
+            f"(provisional, see SAMPLE_TO_TANK_WINDOW_DISTANCE)"
+        )
 
     # 1) read the raw survey points (survey frame)
     raw_points = read_measured_points(filename)
@@ -384,8 +414,10 @@ def get_measured_calibration_data(filename=MEASUREMENT_FILE,
     raw_points = fix_bank5_mislabelled_tube(raw_points, tube_tube_distance)
 
     # 3) convert every point to the NeXus/Geant4 frame with sample origin
-    points = {label: survey_to_nexus_frame(p, sample_to_window_distance)
-              for label, p in raw_points.items()}
+    points = {
+        label: survey_to_nexus_frame(p, sample_to_window_distance)
+        for label, p in raw_points.items()
+    }
 
     # 4) group the end points into tubes, assign the A/B ends
     banks = group_points_into_tubes(points, vertical_bank_ids)
@@ -404,18 +436,26 @@ def get_measured_calibration_data(filename=MEASUREMENT_FILE,
         positions = []
         for tube in tubes:
             eff_A, eff_B, measured_length, excess = find_effective_tube_ends(
-                tube["end_A"], tube["end_B"], effective_length)
+                tube["end_A"], tube["end_B"], effective_length
+            )
             if verbose:
-                flag = "" if EXCESS_LENGTH_RANGE[0] <= excess <= EXCESS_LENGTH_RANGE[1] \
+                flag = (
+                    ""
+                    if EXCESS_LENGTH_RANGE[0] <= excess <= EXCESS_LENGTH_RANGE[1]
                     else "  WARNING: unexpected extra length!"
-                print(f"  bank {bank_id} {tube['label']:7s}: measured {measured_length:7.1f} mm, "
-                      f"effective {effective_length:6.1f} mm, removed {excess:5.1f} mm{flag}")
-            positions.append({
-                "tube_id": tube["tube_id"],  # zero-indexed local tube id
-                "first_pixel_end": [float(v) for v in eff_A],     # low pixel id end
-                "last_pixel_end": [float(v) for v in eff_B],  # other end
-                "distance": float(np.linalg.norm(eff_B - eff_A)),
-            })
+                )
+                print(
+                    f"  bank {bank_id} {tube['label']:7s}: measured {measured_length:7.1f} mm, "
+                    f"effective {effective_length:6.1f} mm, removed {excess:5.1f} mm{flag}"
+                )
+            positions.append(
+                {
+                    "tube_id": tube["tube_id"],  # zero-indexed local tube id
+                    "first_pixel_end": [float(v) for v in eff_A],  # low pixel id end
+                    "last_pixel_end": [float(v) for v in eff_B],  # other end
+                    "distance": float(np.linalg.norm(eff_B - eff_A)),
+                }
+            )
         calibration_data.append({"bank_id": bank_id, "positions": positions})
 
     return calibration_data

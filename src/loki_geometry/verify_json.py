@@ -50,7 +50,11 @@ def _attribute(node, name):
 
 def translation_mm(translation_node):
     """Position [mm] given by a translation dataset (magnitude [m] * unit vector)."""
-    return np.asarray(_attribute(translation_node, "vector"), dtype=float) * _config(translation_node)["values"] * M_TO_MM
+    return (
+        np.asarray(_attribute(translation_node, "vector"), dtype=float)
+        * _config(translation_node)["values"]
+        * M_TO_MM
+    )
 
 
 def _bank_translation_node(group_node, carriage_zero):
@@ -63,14 +67,21 @@ def _bank_translation_node(group_node, carriage_zero):
 def pixel_shape_centre_mm(group_node):
     """Centre of the pixel cylinder relative to the pixel offset point [mm]:
     the midpoint of the centres of its two faces (vertices 0 and 2)."""
-    vertices = np.asarray(_config(_child(_child(group_node, "pixel_shape"), "vertices"))["values"], dtype=float)
+    vertices = np.asarray(
+        _config(_child(_child(group_node, "pixel_shape"), "vertices"))["values"], dtype=float
+    )
     return (vertices[0] + vertices[2]) / 2 * M_TO_MM
 
 
 def bank_pixels_from_group(group_node, carriage_zero=None, use_pixel_shape=True):
     """(pixel ids, absolute pixel centre positions [mm]) of a loki_detector_<id> group."""
     ids = np.asarray(_config(_child(group_node, "detector_number"))["values"])
-    offsets = np.column_stack([_config(_child(group_node, f"{axis}_pixel_offset"))["values"] for axis in "xyz"]) * M_TO_MM
+    offsets = (
+        np.column_stack(
+            [_config(_child(group_node, f"{axis}_pixel_offset"))["values"] for axis in "xyz"]
+        )
+        * M_TO_MM
+    )
     positions = translation_mm(_bank_translation_node(group_node, carriage_zero)) + offsets
     if use_pixel_shape:
         positions = positions + pixel_shape_centre_mm(group_node)
@@ -80,6 +91,7 @@ def bank_pixels_from_group(group_node, carriage_zero=None, use_pixel_shape=True)
 def _iter_nodes_ijson(filename):
     """Yield the nodes of interest (bank groups, carriage zero) of a file, streaming."""
     import ijson
+
     wanted = {bank_name(b) for b in BANK_IDS} | {CARRIAGE_ZERO_NAME, "detector_carriage"}
     with open(filename, "rb") as file:
         # our own output: top level keys
@@ -116,6 +128,7 @@ def read_pixel_positions(filename, use_pixel_shape=True):
     """{bank_id: (pixel ids, pixel centre positions [mm])} of all LOKI banks in a file."""
     try:
         import ijson  # noqa: F401
+
         nodes = _iter_nodes_ijson(filename)
     except ImportError:
         nodes = _iter_nodes_json(filename)
@@ -149,13 +162,24 @@ def compare_with_geant4(banks, pixels_per_straw):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Compare LOKI pixel positions in a NeXus-JSON file with Geant4.")
+    parser = argparse.ArgumentParser(
+        description="Compare LOKI pixel positions in a NeXus-JSON file with Geant4."
+    )
     parser.add_argument("filename")
-    parser.add_argument("--pixels-per-straw", type=int, default=None,
-                        help="default: deduced from the number of pixels in the banks")
-    parser.add_argument("--tolerance", type=float, default=1.0, help="[mm] largest accepted deviation")
-    parser.add_argument("--ignore-pixel-shape", action="store_true",
-                        help="pixel position = translation + offset (do not use the pixel shape centre)")
+    parser.add_argument(
+        "--pixels-per-straw",
+        type=int,
+        default=None,
+        help="default: deduced from the number of pixels in the banks",
+    )
+    parser.add_argument(
+        "--tolerance", type=float, default=1.0, help="[mm] largest accepted deviation"
+    )
+    parser.add_argument(
+        "--ignore-pixel-shape",
+        action="store_true",
+        help="pixel position = translation + offset (do not use the pixel shape centre)",
+    )
     args = parser.parse_args(argv)
 
     banks = read_pixel_positions(args.filename, use_pixel_shape=not args.ignore_pixel_shape)

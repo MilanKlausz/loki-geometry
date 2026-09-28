@@ -18,7 +18,9 @@ from loki_geometry.reference_data import (
 
 @pytest.fixture(scope="module")
 def reference_detectors():
-    return Detectors(convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA), True, run_checks=False)
+    return Detectors(
+        convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA), True, run_checks=False
+    )
 
 
 @pytest.fixture(scope="module")
@@ -28,6 +30,7 @@ def measured_detectors():
 
 # --- self tests ----------------------------------------------------------------
 
+
 def test_reference_data_reproduces_itself(reference_detectors):
     corners = reference_detectors.formatted_data()
     for bank_id in c.BANK_IDS:
@@ -36,13 +39,19 @@ def test_reference_data_reproduces_itself(reference_detectors):
 
 
 @pytest.mark.parametrize("use_pixel_centre_position", [True, False])
-def test_straw_end_output_does_not_depend_on_the_pixel_centre_option(use_pixel_centre_position, reference_detectors):
-    detectors = Detectors(convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA),
-                          use_pixel_centre_position, run_checks=False)
+def test_straw_end_output_does_not_depend_on_the_pixel_centre_option(
+    use_pixel_centre_position, reference_detectors
+):
+    detectors = Detectors(
+        convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA),
+        use_pixel_centre_position,
+        run_checks=False,
+    )
     assert detectors.formatted_data() == reference_detectors.formatted_data()
     for bank_id in c.BANK_IDS:
         assert detectors.banks[bank_id].sample_bank_distance == pytest.approx(
-            reference_detectors.banks[bank_id].sample_bank_distance)
+            reference_detectors.banks[bank_id].sample_bank_distance
+        )
 
 
 def test_geant4_example_data_reproduces_the_nominal_placement():
@@ -58,8 +67,14 @@ def test_geant4_example_data_is_up_to_date():
     """example_calibration_data = first/last pixel centres of the centre straw (Geant4 port)."""
     for bank in example_calibration_data:
         for tube in bank["positions"]:
-            first = g4.pixel_centre(g4.pixel_id(bank["bank_id"], tube["tube_id"], c.CENTRE_STRAW, 0))
-            last = g4.pixel_centre(g4.pixel_id(bank["bank_id"], tube["tube_id"], c.CENTRE_STRAW, c.DEFAULT_PIXELS_PER_STRAW - 1))
+            first = g4.pixel_centre(
+                g4.pixel_id(bank["bank_id"], tube["tube_id"], c.CENTRE_STRAW, 0)
+            )
+            last = g4.pixel_centre(
+                g4.pixel_id(
+                    bank["bank_id"], tube["tube_id"], c.CENTRE_STRAW, c.DEFAULT_PIXELS_PER_STRAW - 1
+                )
+            )
             assert np.allclose(tube["first_pixel_end"], first, atol=1e-5)
             assert np.allclose(tube["last_pixel_end"], last, atol=1e-5)
 
@@ -73,6 +88,7 @@ def test_nominal_corners_match_the_reference_data():
 
 # --- measured data -----------------------------------------------------------
 
+
 def test_survey_file_covers_banks_1_to_8():
     data = survey.get_measured_calibration_data(verbose=False)
     assert [bank["bank_id"] for bank in data] == list(range(1, 9))
@@ -82,16 +98,23 @@ def test_survey_file_covers_banks_1_to_8():
 
 
 def test_survey_tube_ids_agree_with_their_spacing():
-    points = {label: survey.survey_to_nexus_frame(p, 0.0) for label, p in survey.read_measured_points().items()}
+    points = {
+        label: survey.survey_to_nexus_frame(p, 0.0)
+        for label, p in survey.read_measured_points().items()
+    }
     points = survey.fix_bank5_mislabelled_tube(points, c.TUBE_GRID_SIDE)
     banks = survey.group_points_into_tubes(points, c.VERTICAL_BANK_IDS)
     for tube_a, tube_b in banks.values():
         mid_a = (tube_a["end_A"] + tube_a["end_B"]) / 2
         mid_b = (tube_b["end_A"] + tube_b["end_B"]) / 2
-        along = (tube_a["end_B"] - tube_a["end_A"]) / np.linalg.norm(tube_a["end_B"] - tube_a["end_A"])
+        along = (tube_a["end_B"] - tube_a["end_A"]) / np.linalg.norm(
+            tube_a["end_B"] - tube_a["end_A"]
+        )
         across = (mid_b - mid_a) - np.dot(mid_b - mid_a, along) * along
         steps = np.linalg.norm(across) / c.TUBE_GRID_SIDE
-        assert steps == pytest.approx(tube_b["tube_id"] - tube_a["tube_id"], abs=survey.TUBE_ID_TOLERANCE)
+        assert steps == pytest.approx(
+            tube_b["tube_id"] - tube_a["tube_id"], abs=survey.TUBE_ID_TOLERANCE
+        )
 
 
 def test_find_effective_tube_ends_shortens_and_stretches_symmetrically():
@@ -106,13 +129,18 @@ def test_find_effective_tube_ends_shortens_and_stretches_symmetrically():
 
 def test_measured_banks_reproduce_their_input_tubes(measured_detectors):
     for bank in measured_detectors.banks.values():
-        worst = max(np.linalg.norm(residual) for _, residual, _ in bank.quality["reproduction_residuals"])
+        worst = max(
+            np.linalg.norm(residual) for _, residual, _ in bank.quality["reproduction_residuals"]
+        )
         assert worst < 2.0
 
 
 def test_measured_front_face_distance_shifts_with_the_sample_to_window_distance(measured_detectors):
-    shifted = Detectors(survey.get_measured_calibration_data(sample_to_window_distance=110.0, verbose=False),
-                        True, run_checks=False)
+    shifted = Detectors(
+        survey.get_measured_calibration_data(sample_to_window_distance=110.0, verbose=False),
+        True,
+        run_checks=False,
+    )
     for bank_id, bank in measured_detectors.banks.items():
         shift = shifted.banks[bank_id].front_face_centre - bank.front_face_centre
         assert np.allclose(shift, (0.0, 0.0, 110.0 - survey.SAMPLE_TO_TANK_WINDOW_DISTANCE))
