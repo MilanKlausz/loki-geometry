@@ -11,6 +11,7 @@
 !README.md
 !LICENSE
 !.gitignore
+!.git-blame-ignore-revs
 
 # Local, non version controlled material (documents, large JSON files, raw
 # survey data, ...): any directory whose name ends in _local
