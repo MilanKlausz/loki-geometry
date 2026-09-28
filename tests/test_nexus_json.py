@@ -5,12 +5,12 @@ import os
 import numpy as np
 import pytest
 
-import geant4_pixel_positions as g4
-import loki_bank_pixels as lbp
-import loki_nexus_json as lnj
-import verify_nexus_json as vnj
 from conftest import REPO_DIR
-from reference_banks_data import REFERENCE_BANKS_DATA
+from loki_geometry import bank_pixels as lbp
+from loki_geometry import geant4 as g4
+from loki_geometry import nexus_json as lnj
+from loki_geometry import verify_json as vnj
+from loki_geometry.reference_data import REFERENCE_BANKS_DATA
 
 # The current instrument file, if available locally (not version controlled);
 # another location can be given with the LOKI_JSON environment variable.

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loki-geometry"
+dynamic = ["version"]
+description = "Geometry of the LOKI detector banks (ESS): bank calibration from survey data, pixel positions and NeXus-JSON export"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Milan Klausz", email = "Milan.Klausz@ess.eu" }]
+dependencies = ["numpy"]
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+
+[project.optional-dependencies]
+json = ["ijson"]            # streaming of large JSON files in loki-verify-json
+test = ["pytest", "ijson"]
+
+[project.scripts]
+loki-calibrate = "loki_geometry.calibration:main"
+loki-survey = "loki_geometry.survey:main"
+loki-pixel-json = "loki_geometry.nexus_json:main"
+loki-verify-json = "loki_geometry.verify_json:main"
+loki-geant4-validate = "loki_geometry.geant4:main"
+loki-nominal-corners = "loki_geometry.nominal_corners:cli"
+
+[tool.setuptools.dynamic]
+version = { attr = "loki_geometry.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+loki_geometry = ["data/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

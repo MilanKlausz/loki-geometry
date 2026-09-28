@@ -1,0 +1,21 @@
+"""
+loki_geometry: geometry of the LOKI detector banks (ESS).
+
+- Calibration of the 8 bank corner positions from survey data
+  (loki_geometry.survey, loki_geometry.calibration).
+- Pixel geometry (detector numbers and pixel offsets) from the bank corners,
+  and its export as NeXus-JSON nodes for the instrument file
+  (loki_geometry.bank_pixels, loki_geometry.nexus_json), with a verification
+  against the Geant4 geometry (loki_geometry.verify_json).
+- A Python port of the Geant4 pixel positions (loki_geometry.geant4).
+- The intended bank corners (loki_geometry.reference_data).
+
+Coordinates: x horizontal (positive to the left, looking along the beam), y up,
+z along the beam, origin at the sample; mm unless stated otherwise.
+"""
+
+__version__ = "0.1.0"
+
+from .bank_pixels import (BankFrame, BankPixels, compute_bank_pixels,  # noqa: F401
+                          compute_instrument_pixels, PIXEL_BASE, PIXEL_CENTRE)
+from .reference_data import REFERENCE_BANKS_DATA  # noqa: F401

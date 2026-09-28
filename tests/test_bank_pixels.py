@@ -2,9 +2,9 @@
 import numpy as np
 import pytest
 
-import geant4_pixel_positions as g4
-import loki_bank_pixels as lbp
-from reference_banks_data import REFERENCE_BANKS_DATA
+from loki_geometry import bank_pixels as lbp
+from loki_geometry import geant4 as g4
+from loki_geometry.reference_data import REFERENCE_BANKS_DATA
 
 ALL_BANKS = range(lbp.NUMBER_OF_BANKS)
 

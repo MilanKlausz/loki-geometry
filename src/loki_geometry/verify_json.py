@@ -1,9 +1,9 @@
 """
 Verify the pixel positions of a LOKI NeXus-JSON file against the Geant4
-geometry (via the Python port geant4_pixel_positions.py; no dgcode needed).
+geometry (via the Python port geant4.py; no dgcode needed).
 Python counterpart of dgcode_projects/LOKI/G4GeoLoki/scripts/verifyJSON.
 
-Works with the output of loki_nexus_json.py and with a full instrument file
+Works with the output of nexus_json.py and with a full instrument file
 (e.g. loki.json). Pixel centre = bank translation + pixel offset + centre of
 the pixel shape cylinder (the midpoint of its two face centres), so both pixel
 reference conventions (pixel_centre / pixel_base) are handled, and an
@@ -14,7 +14,7 @@ translation, with the carriage motion taken as zero).
 Large files are streamed if the ijson package is installed.
 
 Usage:
-  python3 verify_nexus_json.py loki_detector_pixels.json [--tolerance 0.001]
+  loki-verify-json loki_detector_pixels.json [--tolerance 0.001]
 """
 
 import argparse
@@ -23,8 +23,8 @@ import sys
 
 import numpy as np
 
-import geant4_pixel_positions as g4
-from loki_nexus_json import CARRIAGE_BANK_ID, CARRIAGE_ZERO_NAME, bank_name
+from . import geant4 as g4
+from .nexus_json import CARRIAGE_BANK_ID, CARRIAGE_ZERO_NAME, bank_name
 
 M_TO_MM = 1e3
 

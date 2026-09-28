@@ -6,13 +6,13 @@ positions of two tubes of the bank.
 
 Usage
 -----
-  python3 loki_json_calibration.py [--data measured|reference|example]
-                                   [--sample-to-window-distance D] [--verbose]
-                                   [--compare-to-intended] [--print]
-  --data measured   survey (SAM-606), via measured_calibration_data.py (default)
+  loki-calibrate [--data measured|reference|example]
+                 [--sample-to-window-distance D] [--verbose]
+                 [--compare-to-intended] [--print]
+  --data measured   survey (SAM-606), via survey.py (default)
   --data reference  the intended geometry (REFERENCE_BANKS_DATA) -> must
                     reproduce it (self test of the algorithm)
-  --data example    Geant4 positions from example_calibration_data.py
+  --data example    Geant4 positions from geant4_example_data.py
   --verbose         print the quality report (see Detectors.print_quality_report)
   --compare-to-intended  print the corner shifts from the intended banks
 The "intended" geometry = the banks built from REFERENCE_BANKS_DATA (exact CAD
@@ -81,8 +81,8 @@ import numpy as np
 import sys
 import pprint
 
-from example_calibration_data import example_calibration_data
-from reference_banks_data import REFERENCE_BANKS_DATA, convert_reference_data_to_calibration_data
+from .geant4_example_data import example_calibration_data
+from .reference_data import REFERENCE_BANKS_DATA, convert_reference_data_to_calibration_data
 
 class Detectors:
 
@@ -638,7 +638,7 @@ def main():
                              "(REFERENCE_BANKS_DATA) or the Geant4 example data (default: measured)")
     parser.add_argument("--sample-to-window-distance", type=float, default=None,
                         help="[mm] sample to tank window distance for the measured data "
-                             "(default: the value in measured_calibration_data.py)")
+                             "(default: the value in survey.py)")
     parser.add_argument("--verbose", action="store_true", help="print the quality report")
     parser.add_argument("--compare-to-intended", action="store_true",
                         help="compare the corners with the intended geometry (REFERENCE_BANKS_DATA)")
@@ -654,7 +654,7 @@ def main():
         calibration_data = example_calibration_data
     else:
         print("Using the survey measurement (SAM-606) as calibration data")
-        from measured_calibration_data import get_measured_calibration_data, SAMPLE_TO_TANK_WINDOW_DISTANCE
+        from .survey import get_measured_calibration_data, SAMPLE_TO_TANK_WINDOW_DISTANCE
         distance = SAMPLE_TO_TANK_WINDOW_DISTANCE if args.sample_to_window_distance is None else args.sample_to_window_distance
         calibration_data = get_measured_calibration_data(sample_to_window_distance=distance, verbose=args.verbose)
 

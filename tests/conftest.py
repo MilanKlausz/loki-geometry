@@ -1,6 +1,5 @@
-"""Make the modules of the repository importable from the tests."""
+"""Shared test settings. The package is imported from src/ (see pythonpath in
+pyproject.toml), so the tests run without installing it."""
 import os
-import sys
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, REPO_DIR)

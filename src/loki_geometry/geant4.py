@@ -12,7 +12,7 @@ Validated against `sb_loki_info -p <pixel>` output (see _SB_LOKI_INFO_REFERENCE
 and validate()).
 
 Usage:
-    from geant4_pixel_positions import pixel_centre, pixel_id
+    from loki_geometry.geant4 import pixel_centre, pixel_id
     x, y, z = pixel_centre(pixel_id(bank_id=1, tube_id=13, straw_id=3, pixel_in_straw=0))
 """
 
@@ -259,5 +259,10 @@ def validate(tolerance=1e-5):
             print(f"pixel {pix}: port {np.round(pixel_centre(pix), 6)} vs sb_loki_info {ref} (dev {dev:.2e} mm)")
     return worst
 
-if __name__ == "__main__":
+def main():
+    """Command line entry point (loki-geant4-validate)."""
     print(f"Largest deviation from the sb_loki_info reference values: {validate():.2e} mm")
+
+
+if __name__ == "__main__":
+    main()

@@ -6,7 +6,7 @@ import numpy as np
 import math as m
 import sys
 import pprint
-from reference_banks_data import REFERENCE_BANKS_DATA as REFERENCE_BANKS_DATA
+from .reference_data import REFERENCE_BANKS_DATA
 
 # Bank represented by the end points of the 4 corner tubes.
 class Bank:
@@ -264,10 +264,11 @@ def main(bankIds_to_process):
     # detectors.print_formatted_data()
 
 
-if __name__ == "__main__":
-    if len(sys.argv) == 2:
-        bankIds = [int(sys.argv[1])]
-    if len(sys.argv) == 1:
-        bankIds = [0, 1, 2, 3, 4, 5, 6, 7, 8]
-
+def cli():
+    """Command line entry point (loki-nominal-corners [bank_id])."""
+    bankIds = [int(sys.argv[1])] if len(sys.argv) == 2 else [0, 1, 2, 3, 4, 5, 6, 7, 8]
     main(bankIds)
+
+
+if __name__ == "__main__":
+    cli()

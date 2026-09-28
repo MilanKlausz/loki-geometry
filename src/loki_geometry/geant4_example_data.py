@@ -1,9 +1,9 @@
 # Calibration data taken from the Geant4 geometry (for testing the calibration
 # and the Geant4 geometry itself).
-# Generated with geant4_pixel_positions.py (a validated Python port of the
+# Generated with geant4.py (a validated Python port of the
 # Geant4 AimHelper::getPixelCentreCoordinates), 256 pixels per straw, rear
 # bank at 5 m, positions of the CENTRE straw (straw 3, on the tube axis) [mm].
-# Format (same as produced by measured_calibration_data.py):
+# Format (same as produced by survey.py):
 #   "tube_id": zero-indexed local tube id in the FRONT layer (horizontal banks:
 #              0 = topmost tube, vertical banks: 0 = leftmost tube, beam's view)
 #              (= the Geant4 tube id, for the front layer rows)
@@ -16,7 +16,7 @@
 # pixel 0 and 255 of the straw), not the real straw ends: they are half a pixel
 # inside at both ends. The calibration only uses the tube midpoints and
 # directions, so this does not change its result (use
-# measured_calibration_data.adjust_calibration_data_to_effective_tube_lengths
+# survey.adjust_calibration_data_to_effective_tube_lengths
 # to get the straw ends if needed).
 example_calibration_data = [
     {

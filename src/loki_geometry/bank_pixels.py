@@ -2,7 +2,7 @@
 Pixel positions of the LOKI detector banks from their 8 corner positions.
 
 This is the geometry core used to produce the pixel data of the NeXus/JSON
-instrument description (see loki_nexus_json.py). It follows the simple vector
+instrument description (see nexus_json.py). It follows the simple vector
 approach of generate-nexus-files (examples/loki/LOKI_geometry.py), with the
 straw layout inside the tubes taken from the Geant4 geometry
 (dgcode_projects/LOKI/G4GeoLoki), which it reproduces exactly (see the tests).
@@ -44,7 +44,7 @@ Pixel reference point (what a pixel offset points to), selectable:
       at (k + 0.5) * L / N along the straw;
   PIXEL_BASE   ("pixel_base"): the centre of the pixel's first face (the face
       towards the first pixel end), at k * L / N along the straw.
-The pixel shape in the NeXus output (loki_nexus_json.py) is set accordingly.
+The pixel shape in the NeXus output (nexus_json.py) is set accordingly.
 
 Pixel numbering (as in Geant4 and the ICD, 1-based detector_number):
   pixel_id = bank_first_pixel_id + (tube * 7 + straw) * N + pixel_in_straw
@@ -90,7 +90,7 @@ _STRAW_POSITIONS_TUBE_FRAME = np.array([
 # Angle of the Geant4 tube frame in the (row, depth) frame of a normally mounted
 # pack: 90 deg (frame convention) + tube rotation in the pack (8.45 - 30 - 13.45
 # deg) + pack rotation (13.45 deg) = 68.45 deg. Checked against the Geant4
-# geometry in tests/test_loki_bank_pixels.py.
+# geometry in tests/test_bank_pixels.py.
 _STRAW_PATTERN_ROTATION = np.radians(90.0 + (8.45 - 30.0 - 13.45) + 13.45)
 
 

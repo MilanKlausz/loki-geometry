@@ -38,7 +38,7 @@ Output file layout:
    "detector_carriage_zero": <translation dataset>}
 
 Usage:
-  python3 loki_nexus_json.py -o loki_detector_pixels.json [--pixels-per-straw 256] [--pixel-reference pixel_base]
+  loki-pixel-json -o loki_detector_pixels.json [--pixels-per-straw 256] [--pixel-reference pixel_base]
 
 The corners currently come from REFERENCE_BANKS_DATA (the intended geometry).
 """
@@ -48,7 +48,7 @@ import json
 
 import numpy as np
 
-from loki_bank_pixels import (DEFAULT_PIXELS_PER_STRAW, PIXEL_CENTRE, PIXEL_REFERENCES, STRAW_RADIUS,
+from .bank_pixels import (DEFAULT_PIXELS_PER_STRAW, PIXEL_CENTRE, PIXEL_REFERENCES, STRAW_RADIUS,
                               compute_instrument_pixels, pixel_reference_fraction)
 
 MM_TO_M = 1e-3
@@ -197,7 +197,7 @@ def write_json(output, filename):
 
 def reference_corners():
     """Corners of all banks from REFERENCE_BANKS_DATA (the intended geometry)."""
-    from reference_banks_data import REFERENCE_BANKS_DATA
+    from .reference_data import REFERENCE_BANKS_DATA
     return dict(REFERENCE_BANKS_DATA)
 
 

@@ -1,7 +1,7 @@
 """
 Convert the survey (SAM-606) measurement of the LOKI detector tube ends into the
-calibration-data format used by loki_json_calibration.py (the format of
-example_calibration_data.py).
+calibration-data format used by calibration.py (the format of
+geant4_example_data.py).
 
 Input
 -----
@@ -108,13 +108,13 @@ EXCESS_LENGTH_RANGE = (20., 40.)  # [mm] expected measured - effective length
 
 
 # ---------------------------------------------------------------------------
-# Helpers taken from loki_json_calibration.py (single source of truth).
-# Imported lazily, so that loki_json_calibration.py can import this module
+# Helpers taken from calibration.py (single source of truth).
+# Imported lazily, so that calibration.py can import this module
 # without a circular import problem.
 # ---------------------------------------------------------------------------
 
 def _calibration_constants():
-    from loki_json_calibration import Detectors, Bank
+    from .calibration import Detectors, Bank
     return {
         "tube_length_by_bank": Detectors.tube_length_by_bank,  # [mm]
         "vertical_bank_ids": Detectors.vertical_bank_ids,
@@ -279,7 +279,7 @@ def check_tube_ids_against_nominal(banks, vertical_bank_ids, tube_tube_distance)
     tubes (REFERENCE_BANKS_DATA). Only the coordinate across the tubes within
     the bank plane (y for horizontal, x for vertical banks) is used, which is
     insensitive to the bank shifts along the beam (z) seen in the survey."""
-    from reference_banks_data import REFERENCE_BANKS_DATA
+    from .reference_data import REFERENCE_BANKS_DATA
     print("\nTube id estimated from the nominal geometry (front layer):")
     for bank_id, tubes in sorted(banks.items()):
         ref = REFERENCE_BANKS_DATA[bank_id]
@@ -334,7 +334,7 @@ def adjust_calibration_data_to_effective_tube_lengths(calibration_data, verbose=
     "first_pixel_end" and "last_pixel_end" are assumed to be the two ends of
     the tube (e.g. first and last pixel centre, or physical tube ends); both
     are moved symmetrically along the tube to the effective straw ends.
-    NOTE: loki_json_calibration.py only uses the tube midpoints and directions,
+    NOTE: calibration.py only uses the tube midpoints and directions,
     which this symmetric adjustment does not change, so it is only needed when
     the straw end positions themselves are wanted."""
     import copy
@@ -424,7 +424,12 @@ def get_measured_calibration_data(filename=MEASUREMENT_FILE,
     return calibration_data
 
 
-if __name__ == "__main__":
+def main():
+    """Command line entry point (loki-survey): print the checks and the calibration data."""
     data = get_measured_calibration_data()
     print("\nCalibration data:")
     pprint.pprint(data, sort_dicts=False)
+
+
+if __name__ == "__main__":
+    main()
