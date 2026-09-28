@@ -32,7 +32,7 @@ the JSON verification streams large files if `ijson` is installed (optional).
 
 | File | What it is |
 | --- | --- |
-| `SAM-606/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt` | Survey of the tube ends: 32 points (2 tubes × 2 ends for banks 1–8) as `label, X, Y, Z` [mm] in the TANK WINDOW coordinate system (X along the beam, Y left, Z up). The points are on the tube axis at the physical tube ends, including ~15 mm of end electronics on each end. Bank 0 was not surveyed. |
+| `data/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt` | SAM-606 survey of the tube ends: 32 points (2 tubes × 2 ends for banks 1–8) as `label, X, Y, Z` [mm] in the TANK WINDOW coordinate system (X along the beam, Y left, Z up). The points are on the tube axis at the physical tube ends, including ~15 mm of end electronics on each end. Bank 0 was not surveyed. |
 | `measured_calibration_data.py` | Converts the survey file into calibration data: label → (bank, tube id) map, bank 5 fix, frame conversion, sanity checks, trimming of the end electronics. |
 | `loki_json_calibration.py` | The calibration: calibration data → 8 corner positions per bank, quality report, comparison with the intended geometry, output in the `det_banks_data` format. |
 | `reference_banks_data.py` | `REFERENCE_BANKS_DATA`: the intended corner positions (exact CAD values, a copy of `det_banks_data` in generate-nexus-files) and a converter to the calibration data format. This is the "intended" geometry of the comparisons. |
@@ -43,6 +43,13 @@ the JSON verification streams large files if `ijson` is installed (optional).
 | `verify_nexus_json.py` | Compares the pixel positions of a NeXus-JSON file (the output above, or a full file like `loki.json`) with the Geant4 geometry. Python counterpart of `verifyJSON` in dgcode_projects. |
 | `tests/` | pytest tests of the pixel geometry, the JSON export, the verification and the Geant4 port. |
 | `loki_json_detector_offsets.py` | Rebuilds the intended corner positions from the nominal bank distances, angles and offsets, and compares them with `REFERENCE_BANKS_DATA`. |
+
+Directories:
+- `data/`: measurement data used by the scripts (version controlled).
+- `tests/`: the pytest tests.
+- `*_local/` (e.g. `sources_local/`): local material that is not version controlled, like documents, drawings, raw survey
+  files and large JSON files. The tests that compare with the current instrument file look for `sources_local/loki.json`,
+  or the path in the `LOKI_JSON` environment variable, and are skipped if it is missing.
 
 ## From the measured points to the 8 corner positions
 
@@ -97,8 +104,8 @@ python3 loki_nexus_json.py -o loki_detector_pixels.json               # all bank
 python3 loki_nexus_json.py -o test.json --pixels-per-straw 2 --banks 1 2
 python3 loki_nexus_json.py -o base.json --pixel-reference pixel_base  # offsets to the pixel bases
 python3 verify_nexus_json.py loki_detector_pixels.json               # compare with Geant4
-python3 verify_nexus_json.py loki.json                               # works on the full instrument file too
-python3 verify_nexus_json.py loki.json --ignore-pixel-shape          # offsets only, without the pixel shape
+python3 verify_nexus_json.py path/to/loki.json                       # works on the full instrument file too
+python3 verify_nexus_json.py path/to/loki.json --ignore-pixel-shape  # offsets only, without the pixel shape
 ```
 
 - Output: `{"info": {...}, "loki_detector_0": <group>, …, "loki_detector_8": <group>, "detector_carriage_zero": <translation>}`.

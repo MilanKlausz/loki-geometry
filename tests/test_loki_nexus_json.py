@@ -12,7 +12,9 @@ import verify_nexus_json as vnj
 from conftest import REPO_DIR
 from reference_banks_data import REFERENCE_BANKS_DATA
 
-LOKI_JSON = os.path.join(REPO_DIR, "loki.json")
+# The current instrument file, if available locally (not version controlled);
+# another location can be given with the LOKI_JSON environment variable.
+LOKI_JSON = os.environ.get("LOKI_JSON", os.path.join(REPO_DIR, "sources_local", "loki.json"))
 
 
 def child(node, name):

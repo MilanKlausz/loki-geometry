@@ -5,7 +5,7 @@ example_calibration_data.py).
 
 Input
 -----
-SAM-606/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt
+data/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt (from the SAM-606 survey)
   One line per measured point: "<label>, X, Y, Z" [mm], in the TANK WINDOW
   coordinate system of the survey:
     X - along the beam (downstream positive)
@@ -53,7 +53,7 @@ import numpy as np
 
 MEASUREMENT_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "SAM-606",
+    "data",
     "ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt")
 
 # Distance [mm] along the beam from the nominal sample position to the origin

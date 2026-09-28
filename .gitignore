@@ -1,16 +1,20 @@
 # Ignore everything by default...
 *
 
-# ...but keep directories traversable so nested .py files can be tracked
+# ...but keep directories traversable so nested files can be tracked
 !*/
 
-# Track only Python scripts and this file
+# Track Python scripts, the README and this file
 !*.py
-!.gitignore
 !README.md
+!.gitignore
 
-# Survey data used by measured_calibration_data.py
-!SAM-606/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt
+# Measurement data used by the scripts
+!data/**
+
+# Local, non version controlled material (documents, large JSON files, raw
+# survey data, ...): any directory whose name ends in _local
+*_local/
 
 # Never track bytecode caches
 __pycache__/
