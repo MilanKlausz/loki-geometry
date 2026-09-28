@@ -193,6 +193,44 @@ def pixel_centre(pixel, straw_pixel_number=STRAW_PIXEL_NUMBER, rear_bank_distanc
             py + _bank_position(b, 1, rear_bank_distance),
             pz + _bank_position(b, 2, rear_bank_distance))
 
+# ---------------- vectorised helpers (built on pixel_centre) ----------------
+def bank_pixel_centres(bank_id, straw_pixel_number=STRAW_PIXEL_NUMBER, rear_bank_distance=REAR_BANK_DISTANCE):
+    """Geant4 pixel centres of a whole bank [mm], shape (n_pixels, 3), in pixel id order.
+
+    The pixels of a straw lie on a straight line at equal distances, so only the
+    first and last pixel of each straw are computed with pixel_centre (slow,
+    scalar) and the others are interpolated linearly (exact for this geometry)."""
+    n_straws = PACKS[bank_id] * 8 * 7
+    first_id = bank_pixel_offset(bank_id, straw_pixel_number)
+    starts = np.empty((n_straws, 3))
+    ends = np.empty((n_straws, 3))
+    for straw in range(n_straws):
+        straw_first_pixel = first_id + straw * straw_pixel_number
+        starts[straw] = pixel_centre(straw_first_pixel, straw_pixel_number, rear_bank_distance)
+        ends[straw] = pixel_centre(straw_first_pixel + straw_pixel_number - 1, straw_pixel_number, rear_bank_distance)
+    fraction = np.linspace(0.0, 1.0, straw_pixel_number) if straw_pixel_number > 1 else np.zeros(1)
+    pixels = starts[:, None, :] + (ends - starts)[:, None, :] * fraction[None, :, None]
+    return pixels.reshape(-1, 3)
+
+def bank_corners(bank_id, straw_pixel_number=STRAW_PIXEL_NUMBER, rear_bank_distance=REAR_BANK_DISTANCE):
+    """The 8 corner positions of a bank in the Geant4 geometry, in the
+    REFERENCE_BANKS_DATA format: {'A': [4 points], 'B': [4 points], 'num_tubes'}.
+    The points are the straw ENDS on the tube axis (centre straw, moved half a
+    pixel outwards from the first / last pixel centre) of the corner tubes:
+    [front layer top tube, back layer top tube, front layer bottom tube,
+    back layer bottom tube]; 'A' = first pixel end, 'B' = last pixel end."""
+    rows = PACKS[bank_id] * 2  # tubes per layer
+    corner_tubes = [0, 3 * rows, rows - 1, 4 * rows - 1]
+    centre_straw = 3
+    a_points, b_points = [], []
+    for tube in corner_tubes:
+        first = np.array(pixel_centre(pixel_id(bank_id, tube, centre_straw, 0, straw_pixel_number), straw_pixel_number, rear_bank_distance))
+        last = np.array(pixel_centre(pixel_id(bank_id, tube, centre_straw, straw_pixel_number - 1, straw_pixel_number), straw_pixel_number, rear_bank_distance))
+        half_pixel = (last - first) / (straw_pixel_number - 1) / 2
+        a_points.append(tuple(float(v) for v in first - half_pixel))
+        b_points.append(tuple(float(v) for v in last + half_pixel))
+    return {"A": a_points, "B": b_points, "num_tubes": PACKS[bank_id] * 8}
+
 # Pixel centres printed by `sb_loki_info --nominal_source_sample_distance_meters 0 -p <pixel>` (Milán's notes)
 _SB_LOKI_INFO_REFERENCE = {
     425472: (498.046875, 342.877351, 2935.976184),
