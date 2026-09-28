@@ -7,6 +7,10 @@
 # Track only Python scripts and this file
 !*.py
 !.gitignore
+!README.md
+
+# Survey data used by measured_calibration_data.py
+!SAM-606/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt
 
 # Never track bytecode caches
 __pycache__/
