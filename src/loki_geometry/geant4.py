@@ -32,9 +32,8 @@ INVERSELY_NUMBERED_BANKS = c.UPSIDE_DOWN_BANK_IDS  # tubes numbered inversely (p
 TUBE_OUTER_RADIUS = c.TUBE_OUTER_RADIUS
 
 # ---------------- BcsTube ----------------
-_STRAW_POSITIONS_IN_TUBE = (
-    c.STRAW_POSITIONS_IN_TUBE
-)  # (x, y) in the tube; straw 3 is the centre straw
+# (x, y) in the tube; straw 3 is the centre straw
+_STRAW_POSITIONS_IN_TUBE = c.STRAW_POSITIONS_IN_TUBE
 
 # ---------------- BcsPack ----------------
 _GRID_BASE = c.TUBE_GRID_BASE
