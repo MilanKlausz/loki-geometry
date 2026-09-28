@@ -1,11 +1,11 @@
 # lokiJSON – LOKI detector bank calibration
 
 Tools to derive the 8 corner positions of each LOKI detector bank from the as-built survey of the
-detector tubes (SAM-606). The corner positions are the input of the NeXus/JSON geometry
-generator in `generate-nexus-files/examples/loki/detector_banks_geo.py` (`det_banks_data`),
-which turns them into the positions of all 1,605,632 pixels.
+detector tubes (SAM-606), and to turn corner positions into the pixel geometry (bank positions,
+detector numbers and pixel offsets of all 1,605,632 pixels) for the NeXus/JSON instrument file.
 
-All scripts need only Python 3 and numpy, and are run from this directory.
+All scripts need only Python 3 and numpy, and are run from this directory. The tests need pytest;
+the JSON verification streams large files if `ijson` is installed (optional).
 
 ## Conventions
 
@@ -38,6 +38,10 @@ All scripts need only Python 3 and numpy, and are run from this directory.
 | `reference_banks_data.py` | `REFERENCE_BANKS_DATA`: the intended corner positions (exact CAD values, a copy of `det_banks_data` in generate-nexus-files) and a converter to the calibration data format. This is the "intended" geometry of the comparisons. |
 | `example_calibration_data.py` | Calibration data from the Geant4 geometry (first and last pixel centres of the centre straw of two front-layer tubes per bank, all 9 banks), generated with `geant4_pixel_positions.py`. Used to test the calibration. |
 | `geant4_pixel_positions.py` | Python port of the Geant4 pixel centre calculation (`AimHelper::getPixelCentreCoordinates` in dgcode_projects/LOKI/G4GeoLoki). It matches `sb_loki_info` to 1e-6 mm and all 12,544 pixels of `G4GeoLoki/scripts/test_pixel_position.log` within that file's 0.05 mm rounding. No dgcode environment is needed. |
+| `loki_bank_pixels.py` | Pixel geometry core: from the 8 corners of a bank to the detector numbers and the pixel centre offsets of all its pixels (vector approach of generate-nexus-files, straw layout of Geant4, mirrored straw pattern for the upside-down banks 1, 2, 5, 6 derived from the corners). |
+| `loki_nexus_json.py` | Writes the pixel geometry as NeXus-JSON nodes (the geometry parts of the `loki_detector_<id>` groups, plus `detector_carriage_zero` for the rear bank), ready to be copied into the instrument JSON file. Uses `REFERENCE_BANKS_DATA` for now. |
+| `verify_nexus_json.py` | Compares the pixel positions of a NeXus-JSON file (the output above, or a full file like `loki.json`) with the Geant4 geometry. Python counterpart of `verifyJSON` in dgcode_projects. |
+| `tests/` | pytest tests of the pixel geometry, the JSON export, the verification and the Geant4 port. |
 | `loki_json_detector_offsets.py` | Rebuilds the intended corner positions from the nominal bank distances, angles and offsets, and compares them with `REFERENCE_BANKS_DATA`. |
 
 ## From the measured points to the 8 corner positions
@@ -78,9 +82,54 @@ python3 loki_json_calibration.py --data measured --verbose --compare-to-intended
    - the input tube midpoints recomputed from the final corners (end-to-end check)
    - tilt angle, front face distance and front face centre shift vs the intended geometry
    - the placement in the drawing's terms (section distance, position angle, offset along the tubes)
-9. **Output** (`--print`, `Detectors.formatted_data`): the corners as straw ends in the `REFERENCE_BANKS_DATA` /
-   `det_banks_data` format, ready for generate-nexus-files. Bank 0 is missing because it was not measured, so take it
-   from `REFERENCE_BANKS_DATA` or measure it.
+9. **Output** (`--print`, `Detectors.formatted_data`): the corners as straw ends in the `REFERENCE_BANKS_DATA` format,
+   the input of `loki_bank_pixels.py` / `loki_nexus_json.py`. Bank 0 is missing because it was not measured, so take it
+   from `REFERENCE_BANKS_DATA` or measure it. (Feeding the measured corners into `loki_nexus_json.py` is not wired up yet.)
+
+## Pixel geometry for the instrument JSON file
+
+The people producing the instrument JSON file need, for each bank, the bank translation (from the sample to the
+bank position) and the detector numbers with the local pixel offsets. `loki_nexus_json.py` writes exactly these, as
+NeXus-JSON nodes in the structure of `loki.json`:
+
+```
+python3 loki_nexus_json.py -o loki_detector_pixels.json               # all banks, 256 pixels per straw
+python3 loki_nexus_json.py -o test.json --pixels-per-straw 2 --banks 1 2
+python3 loki_nexus_json.py -o base.json --pixel-reference pixel_base  # offsets to the pixel bases
+python3 verify_nexus_json.py loki_detector_pixels.json               # compare with Geant4
+python3 verify_nexus_json.py loki.json                               # works on the full instrument file too
+python3 verify_nexus_json.py loki.json --ignore-pixel-shape          # offsets only, without the pixel shape
+```
+
+- Output: `{"info": {...}, "loki_detector_0": <group>, …, "loki_detector_8": <group>, "detector_carriage_zero": <translation>}`.
+  Each group holds `detector_number`, `pixel_shape`, `x/y/z_pixel_offset` [m], `transformations` (one translation
+  `trans_<id+1>`) and `depends_on`.
+- **Bank position** (the bank translation, the origin of the pixel offsets) = the bank corner `A[0]`: the first pixel end of
+  tube 0 (front layer, top tube; leftmost tube in vertical banks) on the tube axis, as in the current `loki.json`.
+  It is not a pixel position: the first pixel centre is half a pixel further along the straw, and in straw 0 also 7.75 mm to
+  the side.
+- **Pixel reference point** (`--pixel-reference`), i.e. what the pixel offsets point to:
+  - `pixel_centre` (default): the pixel centres. The pixel shape is centred on them.
+  - `pixel_base`: the centre of the pixel's first face (the face towards the first pixel end). The pixel shape starts there
+    and extends one pixel length along the straw.
+
+  Both describe the same pixel volumes; `info.pixel_reference` in the output records the choice.
+- Bank 0 is on the moving carriage: its group depends on `/entry/instrument/detector_carriage/value`, and its translation is the
+  `detector_carriage_zero` dataset of `/entry/instrument/detector_carriage/transformations`.
+- `pixel_shape` is a cylinder of the straw radius (3.75 mm) and the pixel length along the straw. Its vertices are the centre of
+  the first face, a point on the edge of that face, and the centre of the second face.
+- **Known issue in the current `loki.json`:** its offsets point to the pixel centres (since the generate-nexus-files fix
+  b7269dc), but its pixel shape still starts at the offset point, as if the offsets pointed to the pixel bases. So its pixel
+  volumes are shifted by half a pixel along the straws (0.98 / 1.17 mm with 512 pixels per straw). `verify_nexus_json.py`
+  shows this unless `--ignore-pixel-shape` is given.
+- `verify_nexus_json.py` computes the pixel centres as translation + offset + centre of the pixel shape cylinder, so it
+  checks either convention and catches an inconsistent shape.
+- Pixel ids: `bank first id + (tube · 7 + straw) · N + pixel`, with tube = layer · rows + row, as in Geant4 and the ICD.
+- Checks (all in `tests/`):
+  - With corners taken from the Geant4 geometry, all 1,605,632 pixels agree with the Geant4 port within 1e-6 mm.
+  - With `REFERENCE_BANKS_DATA` they agree within 1 mm, which is the rounding of the CAD values in Geant4.
+  - With 512 pixels per straw, the current `loki.json` offsets are reproduced within 0.011 mm, which is its 5-decimal rounding.
+  - Both pixel reference conventions give the same pixel centres, and an inconsistent pixel shape is detected.
 
 ## Other commands
 
@@ -102,6 +151,9 @@ python3 geant4_pixel_positions.py
 
 # Rebuild the intended corners from distances / angles / offsets and compare with REFERENCE_BANKS_DATA
 python3 loki_json_detector_offsets.py
+
+# Run the tests
+python3 -m pytest tests
 ```
 
 Using the pieces from Python:
@@ -124,9 +176,6 @@ x, y, z = pixel_centre(pixel_id(bank_id=1, tube_id=13, straw_id=3, pixel_in_stra
 - **End electronics:** assumed equally long on both ends. This matters for bank 7, where the two measured tubes are shifted
   2.8 mm relative to each other along the tubes, and which comes out 8 mm off its intended offset.
 - **Bank 0:** not surveyed.
-- **generate-nexus-files limitations:** the LOKI generator assumes axis-aligned banks. `_grid_corners_in_plane` and
-  `_is_bank_cuboid` compare coordinates and lengths exactly, and the tube direction is assumed along x or y. It also sets
-  `STRAW_RESOLUTION = 512`, while LOKI uses 256. The measured corners will need changes there before they can be used.
 - **Geant4 geometry:** it uses rounded CAD values, so `REFERENCE_BANKS_DATA` differs slightly from it (up to 0.56 mm and
   0.05° in bank 8). The geometry building (`pycpp_GeoBCSBanks/geometry_module.cc`) and the pixel position code
   (`libsrc/AimHelper.cc`) both take all positions from `BcsBanks.cc`, but apply the rotations separately.
