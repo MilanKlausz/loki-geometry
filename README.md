@@ -48,6 +48,7 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 | Module | What it is |
 | --- | --- |
 | `data/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt` (package data) | SAM-606 survey of the tube ends: 32 points (2 tubes × 2 ends for banks 1–8) as `label, X, Y, Z` [mm] in the TANK WINDOW coordinate system (X along the beam, Y left, Z up). The points are on the tube axis at the physical tube ends, including ~15 mm of end electronics on each end. Bank 0 was not surveyed. |
+| `constants` | The geometry constants shared by all modules (single source): bank layout, straw and tube grid dimensions, nominal bank placement (distances, position and face angles, offsets) and the derived tilt angles. |
 | `survey` (`loki-survey`) | Converts the survey file into calibration data: label → (bank, tube id) map, bank 5 fix, frame conversion, sanity checks, trimming of the end electronics. |
 | `calibration` (`loki-calibrate`) | The calibration: calibration data → 8 corner positions per bank, quality report, comparison with the intended geometry, output in the `det_banks_data` format. |
 | `reference_data` | `REFERENCE_BANKS_DATA`: the intended corner positions (exact CAD values, a copy of `det_banks_data` in generate-nexus-files) and a converter to the calibration data format. This is the "intended" geometry of the comparisons. |
@@ -211,6 +212,16 @@ pixels = compute_instrument_pixels(
 - **Geant4 geometry:** it uses rounded CAD values, so `REFERENCE_BANKS_DATA` differs slightly from it (up to 0.56 mm and
   0.05° in bank 8). The geometry building (`pycpp_GeoBCSBanks/geometry_module.cc`) and the pixel position code
   (`libsrc/AimHelper.cc`) both take all positions from `BcsBanks.cc`, but apply the rotations separately.
+
+## Development
+
+```
+pip install -e ".[dev]"     # pytest, ijson, ruff
+python3 -m pytest           # tests
+ruff format .               # formatting (line length 100, settings in pyproject.toml)
+ruff check .                # lint: pycodestyle, pyflakes, isort, bugbear, pyupgrade, numpy rules
+git config blame.ignoreRevsFile .git-blame-ignore-revs   # hide formatting-only commits in git blame
+```
 
 ## License
 
