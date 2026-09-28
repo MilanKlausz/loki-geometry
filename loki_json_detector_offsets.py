@@ -153,14 +153,24 @@ class Bank:
         self.positionB = np.dot(self.positionB, rotation_matrix_to_apply)
 
     def _apply_bank_translation(self):
-        """Move the bank to it's place"""
-        distance = self.BANK_DISTANCES[self.bankId] + self.TUBE_RADIUS
+        """Move the bank to it's place.
+        The bank distance is the distance from the sample to the centre of the
+        bank's FRONT FACE (a sheet laid on the front of the front layer tubes),
+        measured in the section plane of the drawing (SI-7615-463) along the
+        bank position angle. The corner points are tube centres, so the front
+        face centre (at distance * direction) is moved by one tube radius along
+        the bank NORMAL (not along the position direction, which differs from
+        the normal by the tilt angle)."""
+        angle = self.BANK_POSITION_ANGLES[self.bankId]
         if self.isVerticalBank:
-            direction = np.array([np.sin(self.BANK_POSITION_ANGLES[self.bankId]), 0, np.cos(self.BANK_POSITION_ANGLES[self.bankId])])
+            direction = np.array([np.sin(angle), 0, np.cos(angle)])
+            # bank normal: +z rotated in the same way as the corner points
+            normal = np.array([0.0, 0.0, 1.0]) @ Bank.rotation_matrix(-m.radians(90), "z").T @ Bank.rotation_matrix(self.BANK_TILT_ANGLES[self.bankId], "y").T
         else:
-            direction = np.array([0, np.sin(self.BANK_POSITION_ANGLES[self.bankId]), np.cos(self.BANK_POSITION_ANGLES[self.bankId])]) 
-        
-        translation = direction * distance
+            direction = np.array([0, np.sin(angle), np.cos(angle)])
+            normal = np.array([0.0, 0.0, 1.0]) @ Bank.rotation_matrix(self.BANK_TILT_ANGLES[self.bankId], "x").T
+
+        translation = direction * self.BANK_DISTANCES[self.bankId] + normal * self.TUBE_RADIUS
         self.positionA = np.add(self.positionA, translation)
         self.positionB = np.add(self.positionB, translation)
 
