@@ -57,41 +57,61 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Constants (TODO: move to a dedicated constants module)
-# ---------------------------------------------------------------------------
+from .constants import (
+    CENTRE_STRAW,
+    DEFAULT_PIXELS_PER_STRAW,
+    LAYERS_PER_BANK,
+    NUMBER_OF_BANKS,
+    STRAW_HEXAGON_ROTATION,
+    STRAW_POSITIONS_IN_TUBE,
+    STRAW_RADIUS,
+    STRAW_TABLE_ROTATION_OFFSET,
+    STRAWS_PER_TUBE,
+    TUBES_PER_BANK,
+    TUBES_PER_LAYER,
+    UPSIDE_DOWN_BANK_IDS,
+)
 
-NUMBER_OF_BANKS = 9
-TUBES_PER_BANK = (224, 64, 48, 64, 48, 112, 128, 80, 128)  # 8 tubes per pack
-LAYERS_PER_BANK = 4
-STRAWS_PER_TUBE = 7
-CENTRE_STRAW = 3
-DEFAULT_PIXELS_PER_STRAW = 256
+__all__ = [
+    "BankFrame",
+    "BankPixels",
+    "CENTRE_STRAW",
+    "DEFAULT_PIXELS_PER_STRAW",
+    "FIRST_PIXEL_ID",
+    "MIRRORED_BANK_IDS",
+    "NUMBER_OF_BANKS",
+    "PIXEL_BASE",
+    "PIXEL_CENTRE",
+    "PIXEL_REFERENCES",
+    "STRAW_POSITIONS_PACK_FRAME",
+    "STRAW_RADIUS",
+    "bank_first_pixel_id",
+    "bank_pixel_ids",
+    "compute_bank_pixels",
+    "compute_instrument_pixels",
+    "local_pixel_offsets",
+    "pixel_offsets_along_straw",
+    "pixel_reference_fraction",
+    "pixels_in_bank",
+    "straw_offsets",
+    "tube_offsets",
+    "tubes_per_layer",
+]
+
 FIRST_PIXEL_ID = 1  # detector_number of the first pixel of bank 0 (ICD numbering)
-STRAW_RADIUS = 3.75  # [mm] outer radius of a straw (pixel shape)
-MIRRORED_BANK_IDS = (1, 2, 5, 6)  # packs mounted upside down (only used as a cross-check)
+MIRRORED_BANK_IDS = UPSIDE_DOWN_BANK_IDS  # only used as a cross-check: derived from the corners
 PIXEL_CENTRE = "pixel_centre"  # pixel offsets point to the pixel centres
-PIXEL_BASE = "pixel_base"      # pixel offsets point to the centre of the pixel's first face
+PIXEL_BASE = "pixel_base"  # pixel offsets point to the centre of the pixel's first face
 PIXEL_REFERENCES = (PIXEL_CENTRE, PIXEL_BASE)
 _PIXEL_REFERENCE_FRACTION = {PIXEL_CENTRE: 0.5, PIXEL_BASE: 0.0}  # position within the pixel
 
-# Straw centres in the tube, in the Geant4 tube frame (BcsTube::strawPositionsInTube) [mm]
-_STRAW_STRAW_DISTANCE = 7.75
-_HALF_WIDTH = 0.5 * _STRAW_STRAW_DISTANCE * np.tan(np.pi / 3)
-_STRAW_POSITIONS_TUBE_FRAME = np.array([
-    (-_HALF_WIDTH, -0.5 * _STRAW_STRAW_DISTANCE),
-    (0.0, -_STRAW_STRAW_DISTANCE),
-    (_HALF_WIDTH, -0.5 * _STRAW_STRAW_DISTANCE),
-    (0.0, 0.0),                                    # straw 3 = centre straw
-    (-_HALF_WIDTH, 0.5 * _STRAW_STRAW_DISTANCE),
-    (0.0, _STRAW_STRAW_DISTANCE),
-    (_HALF_WIDTH, 0.5 * _STRAW_STRAW_DISTANCE),
-])
 # Angle of the Geant4 tube frame in the (row, depth) frame of a normally mounted
-# pack: 90 deg (frame convention) + tube rotation in the pack (8.45 - 30 - 13.45
-# deg) + pack rotation (13.45 deg) = 68.45 deg. Checked against the Geant4
-# geometry in tests/test_bank_pixels.py.
-_STRAW_PATTERN_ROTATION = np.radians(90.0 + (8.45 - 30.0 - 13.45) + 13.45)
+# pack: 90 deg (frame convention) + the straw hexagon rotation (8.45 deg) + the
+# offset of the Geant4 straw table (-30 deg) = 68.45 deg. (In Geant4 the tube is
+# rotated by 8.45 - 30 - 13.45 deg in the pack, and the pack by +13.45 deg.)
+# Checked against the Geant4 geometry in tests/test_bank_pixels.py.
+_STRAW_PATTERN_ROTATION = np.radians(90.0 + STRAW_HEXAGON_ROTATION + STRAW_TABLE_ROTATION_OFFSET)
+_STRAW_POSITIONS_TUBE_FRAME = np.array(STRAW_POSITIONS_IN_TUBE)
 
 
 def _rotate_2d(points, angle):
@@ -116,7 +136,7 @@ def _unit(vector):
 
 def tubes_per_layer(bank_id):
     """Number of tubes in a layer (= rows) of a bank."""
-    return TUBES_PER_BANK[bank_id] // LAYERS_PER_BANK
+    return TUBES_PER_LAYER[bank_id]
 
 
 @dataclass(frozen=True)

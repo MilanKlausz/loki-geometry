@@ -81,94 +81,25 @@ import numpy as np
 import sys
 import pprint
 
+from . import constants as c
 from .geant4_example_data import example_calibration_data
 from .reference_data import REFERENCE_BANKS_DATA, convert_reference_data_to_calibration_data
 
 class Detectors:
 
-    tubes_per_layer_by_bank = np.array([
-        2 * 28, # 0 - rear
-        2 * 8,  # 1 - mid top
-        2 * 6,  # 2 - mid left
-        2 * 8,  # 3 - mid bottom
-        2 * 6,  # 4 - mid right
-        2 * 14, # 5 - front top
-        2 * 16, # 6 - front left
-        2 * 10, # 7 - front bottom
-        2 * 16, # 8 - front right
-    ])
-    tube_length_by_bank = np.array([ #[mm]
-        1000.0,  # 0 - rear
-        1000.0,  # 1 - mid top
-        500.0,   # 2 - mid left
-        1000.0,  # 3 - mid bottom
-        500.0,   # 4 - mid right
-        1200.0,  # 5 - front top
-        1200.0,  # 6 - front left
-        1200.0,  # 7 - front bottom
-        1200.0,  # 8 - front right
-    ])
-    intended_bank_tilt_angles = np.array([ #[degrees]
-        0.0,  # 0 - rear
-        5.7,  # 1 - mid top
-        4.5,  # 2 - mid left
-        5.7,  # 3 - mid bottom
-        4.5,  # 4 - mid right
-        17.5, # 5 - front top
-        10.6, # 6 - front left
-        17.5, # 7 - front bottom
-        10.6, # 8 - front right
-    ])
-    intended_bank_distances = np.array([ #[mm]
-        5000.0,  # 0 - rear #TODO this should depend on an input value
-        2950.0,  # 1 - mid top
-        3350.0,  # 2 - mid left
-        2950.0,  # 3 - mid bottom
-        3350.0,  # 4 - mid right
-        1364.68, # 5 - front top
-        1750.0,  # 6 - front left
-        1340.0,  # 7 - front bottom
-        1750.0,  # 8 - front right
-    ])
-
-    # How the intended distances are defined (Geant4 geometry, BcsBanks.cc):
-    # bankDistance is the distance from the sample to the centre of the FRONT
-    # FACE of the bank's detector system: the centre of the front layer tube
-    # centres, moved by one tube radius (12.7 mm) towards the sample along the
-    # bank normal (i.e. the point on a sheet laid on the front of the tubes).
-    # That point is placed at bankDistance in the direction of the bank position
-    # angle (in the y-z plane for horizontal banks, in the x-z plane for
-    # vertical banks) and THEN shifted by the bank position offset (along the
-    # tubes). So the intended front face centre is
-    #   distance * (0, sin(angle), cos(angle)) + offset   (horizontal banks)
-    #   distance * (sin(angle), 0, cos(angle)) + offset   (vertical banks)
-    # and its distance from the sample is sqrt(distance^2 + |offset|^2).
-    intended_bank_position_angles = np.array([ #[degrees], signed: + is up (horizontal) / left (vertical)
-        0.0,    # 0 - rear
-        9.7,    # 1 - mid top
-        6.5,    # 2 - mid left
-        -9.7,   # 3 - mid bottom
-        -6.5,   # 4 - mid right
-        32.20,  # 5 - front top
-        25.6,   # 6 - front left
-        -27.5,  # 7 - front bottom
-        -25.6,  # 8 - front right
-    ])
-    intended_bank_offsets = np.array([ #[mm] (x, y, z), bankPositionOffset in BcsBanks.cc
-        [0.0, 0.0, 0.0],    # 0 - rear
-        [0.0, 0.0, 0.0],    # 1 - mid top
-        [0.0, 0.0, 0.0],    # 2 - mid left
-        [0.0, 0.0, 0.0],    # 3 - mid bottom
-        [0.0, 0.0, 0.0],    # 4 - mid right
-        [100.0, 0.0, 0.0],  # 5 - front top
-        [0.0, -15.0, 0.0],  # 6 - front left
-        [-100.0, 0.0, 0.0], # 7 - front bottom
-        [0.0, 50.0, 0.0],   # 8 - front right
-    ])
-
-    vertical_bank_ids = [2, 4, 6, 8] # ids of banks which consist of vertical tubes
-    upside_down_bank_ids = [1, 2, 5, 6] # ids of banks which consist of detector packs placed upside down
-    straw_pixel_number = 256 # Number of pixels in each straw
+    # Bank constants (single source: constants.py)
+    tubes_per_layer_by_bank = np.array(c.TUBES_PER_LAYER)
+    tube_length_by_bank = np.array(c.STRAW_LENGTHS)  # [mm] effective straw length
+    # Nominal (Geant4) placement, used when no intended geometry is given (see
+    # constants.py for how the distances are defined: in the section plane,
+    # to the front face centre, with the offsets along the tubes on top).
+    intended_bank_tilt_angles = np.array(c.BANK_TILT_ANGLES)  # [deg]
+    intended_bank_distances = np.array(c.BANK_DISTANCES)  # [mm] #TODO the rear bank distance should be an input value
+    intended_bank_position_angles = np.array(c.BANK_POSITION_ANGLES)  # [deg], + is up (horizontal) / left (vertical)
+    intended_bank_offsets = np.array(c.BANK_OFFSETS)  # [mm] (x, y, z)
+    vertical_bank_ids = c.VERTICAL_BANK_IDS
+    upside_down_bank_ids = c.UPSIDE_DOWN_BANK_IDS
+    straw_pixel_number = c.DEFAULT_PIXELS_PER_STRAW
 
     REFERENCE_BANKS_DATA = REFERENCE_BANKS_DATA # reference data from the generate-nexus repo (also serving as template for output)
 
@@ -405,8 +336,8 @@ class Detectors:
         return self.nominal_section_parameters(bank_id)
 
     def intended_front_face_centre(self, bank_id):
-        """Intended position of the bank's front face centre (see the comment at
-        intended_bank_position_angles)."""
+        """Intended position of the bank's front face centre from the nominal
+        placement (see BANK_DISTANCES in constants.py)."""
         angle = np.radians(self.intended_bank_position_angles[bank_id])
         distance = self.intended_bank_distances[bank_id]
         if bank_id in self.vertical_bank_ids:
@@ -456,9 +387,9 @@ class Bank:
     back layer bottom tube; "top/bottom" = lowest/highest local tube id, i.e.
     left/right for vertical banks). See the module docstring for the algorithm.
     """
-    tube_tube_distance = 28.40 #[mm] distance of neighbouring tubes in a layer
-    front_to_back_up_distance = 18.84 #[mm] front->back layer shift in the tube plane
-    front_to_back_in_distance = 78.78 #[mm] front->back layer shift along the normal
+    tube_tube_distance = c.TUBE_GRID_SIDE  # [mm] distance of neighbouring tubes in a layer
+    front_to_back_up_distance = c.FRONT_TO_BACK_IN_PLANE  # [mm] front->back layer shift in the tube plane (18.84)
+    front_to_back_in_distance = c.FRONT_TO_BACK_NORMAL  # [mm] front->back layer shift along the normal (78.78)
 
     def __init__(self, calibration_bank_data, is_upside_down_bank, tubes_per_layer, tube_length,  straw_pixel_number, use_pixel_centre_position=True, bank_id=None):
         self.bank_id = bank_id
@@ -568,14 +499,15 @@ class Bank:
                 back_bottom_tube_end  # bottom tube in last (4th) layer
                 ]
         )
-        self.positionB = self.positionA - self.vector_along_tubes * (self.tube_length - self.pixel_size)
+        # last pixel ends of the 4 corner tubes (straw ends)
+        self.positionB = self.positionA - self.vector_along_tubes * self.tube_length
 
-        #NOTE the use_pixel_centre_position argument is overridden here (as before)
-        use_pixel_centre_position = True
+        # optionally move both ends half a pixel inwards, to the first / last pixel centres
         self.positions_are_pixel_centres = use_pixel_centre_position
         if use_pixel_centre_position:
-            self.positionA -= self.vector_along_tubes * (self.pixel_size / 2)
-            self.positionB -= self.vector_along_tubes * (self.pixel_size / 2)
+            half_pixel = self.vector_along_tubes * (self.pixel_size / 2)
+            self.positionA = self.positionA - half_pixel
+            self.positionB = self.positionB + half_pixel
 
     def _check_reproduction_of_input(self):
         """End-to-end test: recompute the input tubes from the FINAL corner
@@ -611,15 +543,12 @@ class Bank:
         layer of tube, not the centre of these tubes.
         (see in DETAIL D in SI-7615-463 (LOKI DETECTOR GEOMETRY SKETCH)"""
 
-        if not use_pixel_centre_position:
-            return #TODO implement if needed
-
-        # calculate as the average of the 4 front corner positions
+        # calculate as the average of the 4 front corner positions (the same
+        # for pixel centres and straw ends, as both are symmetric along the tubes)
         centre_at_front_layer_tube_centre = (self.positionA[0] + self.positionA[2] + self.positionB[0] + self.positionB[2]) / 4
 
         #move to the front face from the tube centre plane
-        tube_radius = 12.7 # [mm]
-        bank_front_face_position = centre_at_front_layer_tube_centre - self.vector_perpendicular_layers * tube_radius # normal points away from the sample
+        bank_front_face_position = centre_at_front_layer_tube_centre - self.vector_perpendicular_layers * c.TUBE_OUTER_RADIUS  # normal points away from the sample
         self.front_face_centre = bank_front_face_position
         self.sample_bank_distance = np.linalg.norm(bank_front_face_position)
 

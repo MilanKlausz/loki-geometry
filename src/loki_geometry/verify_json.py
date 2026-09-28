@@ -24,6 +24,7 @@ import sys
 import numpy as np
 
 from . import geant4 as g4
+from .constants import BANK_IDS, STRAWS_PER_TUBE, TUBES_PER_BANK
 from .nexus_json import CARRIAGE_BANK_ID, CARRIAGE_ZERO_NAME, bank_name
 
 M_TO_MM = 1e3
@@ -79,7 +80,7 @@ def bank_pixels_from_group(group_node, carriage_zero=None, use_pixel_shape=True)
 def _iter_nodes_ijson(filename):
     """Yield the nodes of interest (bank groups, carriage zero) of a file, streaming."""
     import ijson
-    wanted = {bank_name(b) for b in range(9)} | {CARRIAGE_ZERO_NAME, "detector_carriage"}
+    wanted = {bank_name(b) for b in BANK_IDS} | {CARRIAGE_ZERO_NAME, "detector_carriage"}
     with open(filename, "rb") as file:
         # our own output: top level keys
         parser = ijson.kvitems(file, "", use_float=True)
@@ -100,7 +101,7 @@ def _iter_nodes_ijson(filename):
 def _iter_nodes_json(filename):
     with open(filename) as file:
         data = json.load(file)
-    wanted = {bank_name(b) for b in range(9)} | {CARRIAGE_ZERO_NAME, "detector_carriage"}
+    wanted = {bank_name(b) for b in BANK_IDS} | {CARRIAGE_ZERO_NAME, "detector_carriage"}
     if any(key in data for key in wanted):
         yield from ((key, value) for key, value in data.items() if key in wanted)
         return
@@ -161,7 +162,7 @@ def main(argv=None):
     pixels_per_straw = args.pixels_per_straw
     if pixels_per_straw is None:
         bank_id, (ids, _) = next(iter(banks.items()))
-        pixels_per_straw = len(ids) // (g4.PACKS[bank_id] * 8 * 7)
+        pixels_per_straw = len(ids) // (TUBES_PER_BANK[bank_id] * STRAWS_PER_TUBE)
     results = compare_with_geant4(banks, pixels_per_straw)
     print(f"{args.filename}: {pixels_per_straw} pixels per straw, deviation from Geant4 [mm]:")
     for bank_id, (deviation, pixel) in results.items():

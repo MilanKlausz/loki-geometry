@@ -47,6 +47,8 @@ import os
 import pprint
 import numpy as np
 
+from . import constants as c
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -107,18 +109,12 @@ TUBE_ID_TOLERANCE = 0.25          # [tube pitch] allowed deviation from integer
 EXCESS_LENGTH_RANGE = (20., 40.)  # [mm] expected measured - effective length
 
 
-# ---------------------------------------------------------------------------
-# Helpers taken from calibration.py (single source of truth).
-# Imported lazily, so that calibration.py can import this module
-# without a circular import problem.
-# ---------------------------------------------------------------------------
-
 def _calibration_constants():
-    from .calibration import Detectors, Bank
+    """The shared geometry constants used here (see constants.py)."""
     return {
-        "tube_length_by_bank": Detectors.tube_length_by_bank,  # [mm]
-        "vertical_bank_ids": Detectors.vertical_bank_ids,
-        "tube_tube_distance": Bank.tube_tube_distance,         # 28.40 mm
+        "tube_length_by_bank": c.STRAW_LENGTHS,  # [mm] effective straw length
+        "vertical_bank_ids": c.VERTICAL_BANK_IDS,
+        "tube_tube_distance": c.TUBE_GRID_SIDE,  # [mm] 28.40
     }
 
 

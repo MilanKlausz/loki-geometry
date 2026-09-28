@@ -18,29 +18,28 @@ Usage:
 
 import numpy as np
 
+from . import constants as c
+
 DEG = np.pi / 180.0
-REAR_BANK_DISTANCE = 5000.0  # [mm] default of sb_loki_info
-STRAW_PIXEL_NUMBER = 256
+REAR_BANK_DISTANCE = c.DEFAULT_REAR_BANK_DISTANCE  # [mm] default of sb_loki_info
+STRAW_PIXEL_NUMBER = c.DEFAULT_PIXELS_PER_STRAW
+
+# Shared geometry constants (see constants.py), under the names used below
+STRAW_LENGTH = c.STRAW_LENGTHS
+PACKS = c.PACKS_PER_BANK
+VERTICAL_BANKS = c.VERTICAL_BANK_IDS
+INVERSELY_NUMBERED_BANKS = c.UPSIDE_DOWN_BANK_IDS  # tubes numbered inversely (packs upside down)
+TUBE_OUTER_RADIUS = c.TUBE_OUTER_RADIUS
 
 # ---------------- BcsTube ----------------
-_STRAW_STRAW_DISTANCE = 7.75
-_T60 = np.tan(np.pi / 3.0)
-_STRAW_POSITIONS_IN_TUBE = [  # (x, y) in the tube; straw 3 is the centre straw
-    (-0.5 * _STRAW_STRAW_DISTANCE * _T60, -0.5 * _STRAW_STRAW_DISTANCE),
-    (0.0, -_STRAW_STRAW_DISTANCE),
-    (0.5 * _STRAW_STRAW_DISTANCE * _T60, -0.5 * _STRAW_STRAW_DISTANCE),
-    (0.0, 0.0),
-    (-0.5 * _STRAW_STRAW_DISTANCE * _T60, 0.5 * _STRAW_STRAW_DISTANCE),
-    (0.0, _STRAW_STRAW_DISTANCE),
-    (0.5 * _STRAW_STRAW_DISTANCE * _T60, 0.5 * _STRAW_STRAW_DISTANCE),
-]
-TUBE_OUTER_RADIUS = 12.7
+_STRAW_POSITIONS_IN_TUBE = c.STRAW_POSITIONS_IN_TUBE  # (x, y) in the tube; straw 3 is the centre straw
 
 # ---------------- BcsPack ----------------
-_GRID_BASE = 27.00
-_GRID_SIDE = 28.40
-_GRID_ANGLE = 13.45 * DEG
-_TUBE_ROTATION_ANGLE = (8.45 - 30) * DEG
+_GRID_BASE = c.TUBE_GRID_BASE
+_GRID_SIDE = c.TUBE_GRID_SIDE
+_GRID_ANGLE = c.TUBE_GRID_ANGLE * DEG
+_TUBE_ROTATION_ANGLE = (c.STRAW_HEXAGON_ROTATION + c.STRAW_TABLE_ROTATION_OFFSET) * DEG
+# Geant4 model internals (only used here)
 _PACK_BOX_WIDTH = 265.7
 _PACK_BOX_HEIGHT = 55.20
 _TUBE_CENTRE_DISTANCE_FROM_PACK_FRONT = 36.50
@@ -61,26 +60,22 @@ def _vertical_tube_offset(in_pack_tube_id):
     return 0.5 * _vertical_tube_distance_in_pack() * (1 if in_pack_tube_id < 4 else -1)
 
 # ---------------- BcsBanks ----------------
+_POSITION_ANGLE = [abs(angle) for angle in c.BANK_POSITION_ANGLES]  # Geant4: unsigned + direction
+_POS_DIR = [c.bank_position_side(b) for b in c.BANK_IDS]
+_TILT_ANGLE = c.BANK_FACE_ANGLES
+_BANK_DISTANCE = c.BANK_DISTANCES  # (bank 0 uses the rear bank distance argument instead)
+_POSITION_OFFSET = c.BANK_OFFSETS
+# Geant4 model internals (only used here)
 _PACK_HOLDER_FROM_PACK_TOP = 7.6
 _PACK_HOLDER_FROM_PACK_FRONT = 7.5
-STRAW_LENGTH = [1000.0, 1000.0, 500.0, 1000.0, 500.0, 1200.0, 1200.0, 1200.0, 1200.0]
-PACKS = [28, 8, 6, 8, 6, 14, 16, 10, 16]
-_POSITION_ANGLE = [0, 9.7, 6.5, 9.7, 6.5, 32.20, 25.6, 27.5, 25.6]
-_TILT_ANGLE = [90.0, 94.0, 92.0, 94.0, 92.0, 104.7, 105.0, 100.0, 105.0]
-_BANK_DISTANCE = [0.0, 2950.0, 3350.0, 2950.0, 3350.0, 1364.68, 1750.0, 1340.0, 1750.0]
-_POS_DIR = [1, 1, 1, -1, -1, 1, 1, -1, -1]
-_POSITION_OFFSET = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
-                    [100.0, 0, 0], [0, -15.0, 0], [-100.0, 0, 0], [0, 50.0, 0]]
 _BANK_SIZE = [[1265.0, 1806.0, 285.00 + 15], [1265.0, 590.18, 297.82], [765.0, 447.45, 298.92],
               [1265.0, 590.18, 297.82], [765.0, 447.45, 298.92], [1465.0, 945.00, 303.09],
               [1465.0, 1016.11, 302.99], [1465.0, 681.43, 302.99], [1465.0, 1016.11, 302.99]]
 _TOPMOST_PACK_HOLDER = [[117.26, 35.65], [77.12, 31.33], [77.38, 31.33], [77.12, 31.33], [77.38, 31.33],
                         [77.94, 31.33], [77.92, 31.33], [77.92, 31.33], [77.92, 31.33]]
-VERTICAL_BANKS = (2, 4, 6, 8)
-INVERSELY_NUMBERED_BANKS = (1, 2, 5, 6)
 
 def _bank_rotation_z(b):
-    return (90 - (_TILT_ANGLE[b] - _POSITION_ANGLE[b])) * DEG
+    return c.bank_tilt_angle(b) * DEG  # 90 - (tiltAngle - positionAngle)
 
 _BANK_ROTATION = [[0.0, 0.5 * np.pi], [np.pi, 0.5 * np.pi], [1.5 * np.pi, 0.5 * np.pi], [0.0, 0.5 * np.pi],
                   [0.5 * np.pi, 0.5 * np.pi], [np.pi, 0.5 * np.pi], [1.5 * np.pi, 0.5 * np.pi],
@@ -157,7 +152,7 @@ def _rotate(x, y, angle):
 
 def pixel_centre(pixel, straw_pixel_number=STRAW_PIXEL_NUMBER, rear_bank_distance=REAR_BANK_DISTANCE):
     """Port of AimHelper::getPixelCentreCoordinates (new tube numbering, not Larmor 2022)."""
-    b = next(i for i in range(9) if pixel < bank_pixel_offset(i + 1, straw_pixel_number))
+    b = next(i for i in c.BANK_IDS if pixel < bank_pixel_offset(i + 1, straw_pixel_number))
     in_bank = pixel - bank_pixel_offset(b, straw_pixel_number)
     tube = in_bank // (straw_pixel_number * 7)
     straw = (in_bank - tube * 7 * straw_pixel_number) // straw_pixel_number

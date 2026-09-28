@@ -9,6 +9,7 @@ loki_geometry: geometry of the LOKI detector banks (ESS).
   against the Geant4 geometry (loki_geometry.verify_json).
 - A Python port of the Geant4 pixel positions (loki_geometry.geant4).
 - The intended bank corners (loki_geometry.reference_data).
+- The shared geometry constants (loki_geometry.constants).
 
 Coordinates: x horizontal (positive to the left, looking along the beam), y up,
 z along the beam, origin at the sample; mm unless stated otherwise.
@@ -16,6 +17,7 @@ z along the beam, origin at the sample; mm unless stated otherwise.
 
 __version__ = "0.1.0"
 
+from . import constants  # noqa: F401
 from .bank_pixels import (BankFrame, BankPixels, compute_bank_pixels,  # noqa: F401
                           compute_instrument_pixels, PIXEL_BASE, PIXEL_CENTRE)
 from .reference_data import REFERENCE_BANKS_DATA  # noqa: F401

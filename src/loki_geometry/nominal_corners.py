@@ -1,96 +1,44 @@
-# This script should get the distance to the bank centres (detector face at the
-# centre of a given bank) and output the position of each banks corner positions
-# that can be used to generate the loki json geometry.
+"""
+Rebuild the intended corner positions of the banks from the nominal bank
+distances, angles and offsets (drawing SI-7615-463 / Geant4, see
+constants.py), and compare them with REFERENCE_BANKS_DATA.
+"""
+
+import math as m
+import pprint
+import sys
 
 import numpy as np
-import math as m
-import sys
-import pprint
+
+from . import constants as c
 from .reference_data import REFERENCE_BANKS_DATA
+
+
+def _signed_tilt(bank_id):
+    """Counterclockwise tilt rotation of a bank [rad] (around x for horizontal,
+    around -y for vertical banks)."""
+    sign = c.bank_position_side(bank_id) * (1 if bank_id in c.VERTICAL_BANK_IDS else -1)
+    return m.radians(sign * c.bank_tilt_angle(bank_id))
+
 
 # Bank represented by the end points of the 4 corner tubes.
 class Bank:
-    BANK_DISTANCES = np.array([
-        5000.0,  # 0 - rear #TODO fix this
-        2950.0,  # 1 - mid top
-        3350.0,  # 2 - mid left
-        2950.0,  # 3 - mid bottom
-        3350.0,  # 4 - mid right
-        1364.68, # 5 - front top
-        1750.0,  # 6 - front left
-        1340.0,  # 7 - front bottom
-        1750.0,  # 8 - front right
-    ])
+    BANK_DISTANCES = np.array(c.BANK_DISTANCES)
+    STRAW_LENGTHS = np.array(c.STRAW_LENGTHS)
+    BANK_TILT_ANGLES = np.array([_signed_tilt(b) for b in c.BANK_IDS])  # counterclockwise rotation angles
+    BANK_POSITION_ANGLES = np.radians(c.BANK_POSITION_ANGLES)  # counterclockwise rotation angles
+    BANK_OFFSETS = np.array(c.BANK_OFFSETS)
+    PACKS_PER_BANK = np.array(c.PACKS_PER_BANK)
 
-    STRAW_LENGTHS = np.array([
-        1000.0,  # 0 - rear
-        1000.0,  # 1 - mid top
-        500.0,   # 2 - mid left
-        1000.0,  # 3 - mid bottom
-        500.0,   # 4 - mid right
-        1200.0,  # 5 - front top
-        1200.0,  # 6 - front left
-        1200.0,  # 7 - front bottom
-        1200.0,  # 8 - front right
-    ])
-
-    BANK_TILT_ANGLES = np.array([ # counterclockwise rotation angles
-        m.radians(0.0),  # 0 - rear
-        m.radians(-9.7 + (94 - 90)),  # 1 - mid top 
-        m.radians(6.5 - (92 - 90)),   # 2 - mid left
-        m.radians(9.7 - (94 - 90)),   # 3 - mid bottom
-        m.radians(-6.5 + (92 - 90)),  # 4 - mid right
-        m.radians(-32.20 + (104.7 - 90)), # 5 - front top
-        m.radians(25.6 - (105.0 - 90)),   # 6 - front left
-        m.radians(27.5 - (100 - 90)),     # 7 - front bottom #note 100=180-80, 80 deg is indicated in the tech drawing
-        m.radians(-25.6 + (105.0 - 90)),  # 8 - front right
-    ])
-
-    BANK_POSITION_ANGLES = np.array([ # counterclockwise rotation angles
-        m.radians(0.0),   # 0 - rear
-        m.radians(9.7),   # 1 - mid top
-        m.radians(6.5),   # 2 - mid left
-        m.radians(-9.7),  # 3 - mid bottom
-        m.radians(-6.5),  # 4 - mid right
-        m.radians(32.20), # 5 - front top
-        m.radians(25.6),  # 6 - front left
-        m.radians(-27.5), # 7 - front bottom
-        m.radians(-25.6), # 8 - front right
-    ])
-
-    BANK_OFFSETS = np.array([
-        [0.0, 0.0, 0.0],    # 0 - rear
-        [0.0, 0.0, 0.0],    # 1 - mid top
-        [0.0, 0.0, 0.0],    # 2 - mid left
-        [0.0, 0.0, 0.0],    # 3 - mid bottom
-        [0.0, 0.0, 0.0],    # 4 - mid right
-        [100.0, 0.0, 0.0],  # 5 - front top
-        [0.0, -15.0, 0.0],  # 6 - front left
-        [-100.0, 0.0, 0.0], # 7 - front bottom
-        [0.0, 50.0, 0.0],   # 8 - front right
-    ])
-
-    PACKS_PER_BANK = np.array([
-        28, # 0 - rear
-        8,  # 1 - mid top
-        6,  # 2 - mid left
-        8,  # 3 - mid bottom
-        6,  # 4 - mid right
-        14, # 5 - front top
-        16, # 6 - front left
-        10, # 7 - front bottom
-        16, # 8 - front right
-    ])
-
-    TUBE_GRID_BASE = 27.00  # [mm]
-    TUBE_GRID_SIDE = 28.40  # [mm]
-    TUBE_GRID_ANGLE = 13.45 # [mm] 90-76.55=13.45
-    TUBE_RADIUS = 12.7 # [mm]
-    BANK_DEPTH = 3 * TUBE_GRID_BASE # distance between first and last layer centers
+    TUBE_GRID_BASE = c.TUBE_GRID_BASE  # [mm]
+    TUBE_GRID_SIDE = c.TUBE_GRID_SIDE  # [mm]
+    TUBE_GRID_ANGLE = c.TUBE_GRID_ANGLE  # [deg]
+    TUBE_RADIUS = c.TUBE_OUTER_RADIUS  # [mm]
+    BANK_DEPTH = (c.LAYERS_PER_BANK - 1) * TUBE_GRID_BASE  # distance between first and last layer centers
 
     def __init__(self, bankId):
         self.bankId = bankId
-        self.isVerticalBank = bankId in [2, 4, 6, 8]
+        self.isVerticalBank = bankId in c.VERTICAL_BANK_IDS
         
         # 1. Start with baseline coordinates calculated from the bank dimensions
         self._initialize_corner_positions()
@@ -108,13 +56,13 @@ class Bank:
     def _initialize_corner_positions(self):
         """Calculates the initial A,B corner positions based on bank dimensions."""
 
-        firstLayerToLastLayerVector = [0, 18.84, 78.78]
+        firstLayerToLastLayerVector = [0, c.FRONT_TO_BACK_IN_PLANE, c.FRONT_TO_BACK_NORMAL]
         topToBottomVector = [0, -self._get_bank_height(), 0]
         positionAtoBvector = [-self.STRAW_LENGTHS[self.bankId], 0, 0]
 
         firstTubePosition = [self.STRAW_LENGTHS[self.bankId] / 2, self._get_bank_height() / 2, 0]
 
-        if self.bankId in [1, 2, 5, 6]:
+        if self.bankId in c.UPSIDE_DOWN_BANK_IDS:
             # These banks consist of packs mounted upside-down
             firstLayerToLastLayerVector[1] *= -1
 
@@ -201,7 +149,7 @@ class Bank:
             raise ValueError("Invalid axis. Must be 'x', 'y', or 'z'.")
 
 class Detectors:
-    BANK_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    BANK_IDS = list(c.BANK_IDS)
 
     def __init__(self):
         self.banks = {}
@@ -266,7 +214,7 @@ def main(bankIds_to_process):
 
 def cli():
     """Command line entry point (loki-nominal-corners [bank_id])."""
-    bankIds = [int(sys.argv[1])] if len(sys.argv) == 2 else [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    bankIds = [int(sys.argv[1])] if len(sys.argv) == 2 else list(c.BANK_IDS)
     main(bankIds)
 
 

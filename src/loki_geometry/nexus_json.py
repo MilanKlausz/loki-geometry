@@ -48,8 +48,8 @@ import json
 
 import numpy as np
 
-from .bank_pixels import (DEFAULT_PIXELS_PER_STRAW, PIXEL_CENTRE, PIXEL_REFERENCES, STRAW_RADIUS,
-                              compute_instrument_pixels, pixel_reference_fraction)
+from .bank_pixels import PIXEL_CENTRE, PIXEL_REFERENCES, compute_instrument_pixels, pixel_reference_fraction
+from .constants import DEFAULT_PIXELS_PER_STRAW, STRAW_RADIUS
 
 MM_TO_M = 1e-3
 LENGTH_UNIT = "m"
