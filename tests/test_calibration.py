@@ -10,7 +10,10 @@ from loki_geometry import survey
 from loki_geometry.calibration import Detectors
 from loki_geometry.geant4_example_data import example_calibration_data
 from loki_geometry.nominal_corners import Bank as NominalBank
-from loki_geometry.reference_data import REFERENCE_BANKS_DATA, convert_reference_data_to_calibration_data
+from loki_geometry.reference_data import (
+    REFERENCE_BANKS_DATA,
+    convert_reference_data_to_calibration_data,
+)
 
 
 @pytest.fixture(scope="module")

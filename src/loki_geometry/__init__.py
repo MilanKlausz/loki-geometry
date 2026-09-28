@@ -18,6 +18,12 @@ z along the beam, origin at the sample; mm unless stated otherwise.
 __version__ = "0.1.0"
 
 from . import constants  # noqa: F401
-from .bank_pixels import (BankFrame, BankPixels, compute_bank_pixels,  # noqa: F401
-                          compute_instrument_pixels, PIXEL_BASE, PIXEL_CENTRE)
+from .bank_pixels import (  # noqa: F401
+                          PIXEL_BASE,
+                          PIXEL_CENTRE,
+                          BankFrame,
+                          BankPixels,
+                          compute_bank_pixels,
+                          compute_instrument_pixels,
+)
 from .reference_data import REFERENCE_BANKS_DATA  # noqa: F401

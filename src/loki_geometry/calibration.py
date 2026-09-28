@@ -77,13 +77,14 @@ Then Detectors checks the orthogonality of the basis, the tilt angles and the
 sample-bank distances against the intended values.
 """
 
-import numpy as np
-import sys
 import pprint
+
+import numpy as np
 
 from . import constants as c
 from .geant4_example_data import example_calibration_data
 from .reference_data import REFERENCE_BANKS_DATA, convert_reference_data_to_calibration_data
+
 
 class Detectors:
 
@@ -224,7 +225,7 @@ class Detectors:
                   f"deviation {(q['spacing_in_pitches'] - (tb['tube_id'] - ta['tube_id'])) * bank.tube_tube_distance:+.2f} mm)")
             along, across, normal = q["tube0_prediction_difference"]
             print(f"  tube 0 predicted by the 2 tubes differs by: along {along:+.2f}, across {across:+.2f}, normal {normal:+.2f} mm")
-            print(f"  reproduction of the input tubes by the final corners (input - predicted midpoint) [mm]:")
+            print("  reproduction of the input tubes by the final corners (input - predicted midpoint) [mm]:")
             for tube_id, (r_along, r_across, r_normal), length_difference in q["reproduction_residuals"]:
                 print(f"    tube {tube_id:2d}: along {r_along:+6.2f}  across {r_across:+6.2f}  normal {r_normal:+6.2f}"
                       f"   (input length - straw length: {length_difference:+.2f})")
@@ -241,7 +242,7 @@ class Detectors:
                   f"difference {bank.sample_bank_distance - intended_distance:+.2f} mm")
             print(f"  front face centre shift from intended: x {shift[0]:+.2f}  y {shift[1]:+.2f}  z {shift[2]:+.2f} mm")
             (d, a, o), (di, ai, oi), (dn, an, on) = self.section_parameters(bank_id), self.intended_section_parameters(bank_id), self.nominal_section_parameters(bank_id)
-            print(f"  as in the drawing / Geant4 (section plane distance, position angle, offset along the tubes):")
+            print("  as in the drawing / Geant4 (section plane distance, position angle, offset along the tubes):")
             print(f"    distance {d:8.2f} mm, intended {di:8.2f} (Geant4 nominal {dn}), difference {d - di:+6.2f} mm")
             print(f"    angle    {a:8.3f} deg, intended {ai:8.3f} (Geant4 nominal {an}), difference {a - ai:+6.3f} deg")
             print(f"    offset   {o:8.2f} mm, intended {oi:8.2f} (Geant4 nominal {on}), difference {o - oi:+6.2f} mm")
@@ -358,7 +359,7 @@ class Detectors:
     def _verify_bank_tilt_angle(self):
         angle_tolerance = 0.1
         all_tilt_angles_agree = True
-        for bank_id, bank in self.banks.items():
+        for bank_id in self.banks:
             tilt_angle, intended = self.tilt_angle(bank_id), self.intended_tilt(bank_id)
             if not np.isclose(tilt_angle, intended, atol=angle_tolerance):
                 print(f"Warning: Bank {bank_id} tilt angle {tilt_angle:.3f} degrees differs from intended {intended:.3f} degrees ({self.intended_label}).")
@@ -583,7 +584,7 @@ def main():
         calibration_data = example_calibration_data
     else:
         print("Using the survey measurement (SAM-606) as calibration data")
-        from .survey import get_measured_calibration_data, SAMPLE_TO_TANK_WINDOW_DISTANCE
+        from .survey import SAMPLE_TO_TANK_WINDOW_DISTANCE, get_measured_calibration_data
         distance = SAMPLE_TO_TANK_WINDOW_DISTANCE if args.sample_to_window_distance is None else args.sample_to_window_distance
         calibration_data = get_measured_calibration_data(sample_to_window_distance=distance, verbose=args.verbose)
 

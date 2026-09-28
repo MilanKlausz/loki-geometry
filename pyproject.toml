@@ -16,6 +16,7 @@ license-files = ["LICENSE"]
 [project.optional-dependencies]
 json = ["ijson"]            # streaming of large JSON files in loki-verify-json
 test = ["pytest", "ijson"]
+dev = ["pytest", "ijson", "ruff"]
 
 [project.scripts]
 loki-calibrate = "loki_geometry.calibration:main"
@@ -37,3 +38,16 @@ loki_geometry = ["data/*.txt"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, bugbear, pyupgrade, numpy-specific rules
+select = ["E", "W", "F", "I", "B", "UP", "NPY"]
+# Long lines are handled by the formatter; strings, comments and docstrings may stay longer.
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["loki_geometry"]

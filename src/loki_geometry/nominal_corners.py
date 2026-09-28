@@ -39,16 +39,16 @@ class Bank:
     def __init__(self, bankId):
         self.bankId = bankId
         self.isVerticalBank = bankId in c.VERTICAL_BANK_IDS
-        
+
         # 1. Start with baseline coordinates calculated from the bank dimensions
         self._initialize_corner_positions()
-        
+
         # 2. Apply geometric transformations
         self._apply_vertical_bank_rotation()
         self._apply_bank_tilt()
         self._apply_bank_translation()
         self._apply_bank_offset()
-        
+
         # Round all values to 2 decimal places
         self.positionA = np.round(self.positionA, 2)
         self.positionB = np.round(self.positionB, 2)
@@ -161,19 +161,19 @@ class Detectors:
         bank_data = {}
         for bank_id, bank_instance in self.banks.items():
             # Use existing data as template, make a copy to avoid modifying the original
-            bank_output = self._REFERENCE_BANKS_DATA.get(bank_id, {}).copy() 
-            
+            bank_output = self._REFERENCE_BANKS_DATA.get(bank_id, {}).copy()
+
             # Round coordinates and convert to tuples to match reference formatting
             bank_output["A"] = [tuple(pos) for pos in bank_instance.positionA]
             bank_output["B"] = [tuple(pos) for pos in bank_instance.positionB]
-            
+
             bank_data[bank_id] = bank_output
-        
+
         formatted_output = {bank_id: bank_data[bank_id] for bank_id in self.BANK_IDS}
-    
+
         # Use pprint to preserve tuples () and integer keys in the console output
         pprint.pprint(formatted_output, sort_dicts=False, indent=4)
-    
+
     # reference data from the generate-nexus repo (also serving as template for output)
     _REFERENCE_BANKS_DATA = REFERENCE_BANKS_DATA
 
@@ -192,22 +192,21 @@ def compare_arrays(arr1, arr2, tolerance=1.0):
 
 def main(bankIds_to_process):
     detectors = Detectors()
-    
+
     #TODO this comparison could be part of the Detector class
     for bankId in bankIds_to_process:
         positionA = detectors.banks[bankId].positionA
         positionB = detectors.banks[bankId].positionB
-        
+
         reference_banks_data = detectors._REFERENCE_BANKS_DATA
 
         tolerance = 1 #[mm]
         print(f"\nComparing bank {bankId} position A to reference values:")
         compare_arrays(positionA, reference_banks_data[bankId]["A"], tolerance)
 
-        # # TODO temp commented out
-        # print(f"\nComparing bank {bankId} position B to reference values:")
-        # compare_arrays(positionB, reference_banks_data[bankId]["B"], tolerance)
-    
+        print(f"\nComparing bank {bankId} position B to reference values:")
+        compare_arrays(positionB, reference_banks_data[bankId]["B"], tolerance)
+
     # Generate and print data structure matching the reference template
     # detectors.print_formatted_data()
 

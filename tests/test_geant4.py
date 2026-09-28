@@ -3,9 +3,9 @@ import os
 
 import numpy as np
 import pytest
+from conftest import REPO_DIR
 
 from loki_geometry import geant4 as g4
-from conftest import REPO_DIR
 
 DGCODE_PIXEL_LOG = os.path.join(REPO_DIR, "..", "dgcode_projects", "LOKI", "G4GeoLoki", "scripts", "test_pixel_position.log")
 

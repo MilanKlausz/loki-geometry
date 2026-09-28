@@ -4,8 +4,8 @@ import os
 
 import numpy as np
 import pytest
-
 from conftest import REPO_DIR
+
 from loki_geometry import bank_pixels as lbp
 from loki_geometry import geant4 as g4
 from loki_geometry import nexus_json as lnj
