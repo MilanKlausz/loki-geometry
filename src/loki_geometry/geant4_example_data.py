@@ -1,7 +1,7 @@
 # Calibration data taken from the Geant4 geometry (for testing the calibration
 # and the Geant4 geometry itself).
 # Generated with geant4.py (a validated Python port of the
-# Geant4 AimHelper::getPixelCentreCoordinates), 256 pixels per straw, rear
+# AimHelper::getPixelCentreCoordinates of G4GeoLoki), 256 pixels per straw, rear
 # bank at 5 m, positions of the CENTRE straw (straw 3, on the tube axis) [mm].
 # Format (same as produced by survey.py):
 #   "tube_id": zero-indexed local tube id in the FRONT layer (horizontal banks:

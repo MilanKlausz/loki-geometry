@@ -1,7 +1,8 @@
 """
 Verify the pixel positions of a LOKI NeXus-JSON file against the Geant4
-geometry (via the Python port geant4.py; no dgcode needed).
-Python counterpart of dgcode_projects/LOKI/G4GeoLoki/scripts/verifyJSON.
+geometry (via geant4.py, the Python port of the Geant4 pixel positions).
+Python counterpart of scripts/verifyJSON of the LOKI Geant4 geometry package
+G4GeoLoki (https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki).
 
 Works with the output of nexus_json.py and with a full instrument file
 (e.g. loki.json). Pixel centre = bank translation + pixel offset + centre of
@@ -11,10 +12,9 @@ inconsistent pixel shape shows up as a deviation. The bank translation is the
 transformation the group depends on (for bank 0 the detector_carriage_zero
 translation, with the carriage motion taken as zero).
 --ignore-pixel-shape uses bank translation + pixel offset only.
-Large files are streamed if the ijson package is installed.
 
 Usage:
-  loki-verify-json loki_detector_pixels.json [--tolerance 0.001]
+  loki-verify-json FILE [--tolerance 1.0] [--pixels-per-straw N] [--ignore-pixel-shape]
 """
 
 import argparse
@@ -88,29 +88,10 @@ def bank_pixels_from_group(group_node, carriage_zero=None, use_pixel_shape=True)
     return ids, positions
 
 
-def _iter_nodes_ijson(filename):
-    """Yield the nodes of interest (bank groups, carriage zero) of a file, streaming."""
-    import ijson
-
-    wanted = {bank_name(b) for b in BANK_IDS} | {CARRIAGE_ZERO_NAME, "detector_carriage"}
-    with open(filename, "rb") as file:
-        # our own output: top level keys
-        parser = ijson.kvitems(file, "", use_float=True)
-        found = False
-        for key, value in parser:
-            if key in wanted:
-                found = True
-                yield key, value
-        if found:
-            return
-    with open(filename, "rb") as file:
-        # full instrument file: /entry/instrument children
-        for node in ijson.items(file, "children.item.children.item.children.item", use_float=True):
-            if node.get("name") in wanted:
-                yield node["name"], node
-
-
-def _iter_nodes_json(filename):
+def _iter_nodes(filename):
+    """Yield (name, node) of the nodes of interest (bank groups, carriage zero) of a
+    file: the top level keys of our own output, or the /entry/instrument children
+    of a full instrument file."""
     with open(filename) as file:
         data = json.load(file)
     wanted = {bank_name(b) for b in BANK_IDS} | {CARRIAGE_ZERO_NAME, "detector_carriage"}
@@ -125,21 +106,18 @@ def _iter_nodes_json(filename):
 
 
 def read_pixel_positions(filename, use_pixel_shape=True):
-    """{bank_id: (pixel ids, pixel centre positions [mm])} of all LOKI banks in a file."""
-    try:
-        import ijson  # noqa: F401
-
-        nodes = _iter_nodes_ijson(filename)
-    except ImportError:
-        nodes = _iter_nodes_json(filename)
+    """{bank_id: (pixel ids, pixel centre positions [mm])} of all LOKI banks in a file.
+    Raises ValueError if the file has no LOKI bank groups."""
     banks, pending, carriage_zero = {}, {}, None
-    for name, node in nodes:
+    for name, node in _iter_nodes(filename):
         if name == CARRIAGE_ZERO_NAME:
             carriage_zero = node
         elif name == "detector_carriage":
             carriage_zero = _child(_child(node, "transformations"), CARRIAGE_ZERO_NAME)
         else:
             pending[int(name.rsplit("_", 1)[1])] = node
+    if not pending:
+        raise ValueError(f"{filename}: no LOKI detector groups (loki_detector_<id>) found")
     for bank_id, node in sorted(pending.items()):
         if bank_id == CARRIAGE_BANK_ID and carriage_zero is None:
             raise ValueError(f"{CARRIAGE_ZERO_NAME} translation not found for {bank_name(bank_id)}")
@@ -182,12 +160,15 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
 
-    banks = read_pixel_positions(args.filename, use_pixel_shape=not args.ignore_pixel_shape)
-    pixels_per_straw = args.pixels_per_straw
-    if pixels_per_straw is None:
-        bank_id, (ids, _) = next(iter(banks.items()))
-        pixels_per_straw = len(ids) // (TUBES_PER_BANK[bank_id] * STRAWS_PER_TUBE)
-    results = compare_with_geant4(banks, pixels_per_straw)
+    try:
+        banks = read_pixel_positions(args.filename, use_pixel_shape=not args.ignore_pixel_shape)
+        pixels_per_straw = args.pixels_per_straw
+        if pixels_per_straw is None:
+            bank_id, (ids, _) = next(iter(banks.items()))
+            pixels_per_straw = len(ids) // (TUBES_PER_BANK[bank_id] * STRAWS_PER_TUBE)
+        results = compare_with_geant4(banks, pixels_per_straw)
+    except ValueError as error:
+        parser.error(str(error))
     print(f"{args.filename}: {pixels_per_straw} pixels per straw, deviation from Geant4 [mm]:")
     for bank_id, (deviation, pixel) in results.items():
         flag = "" if deviation <= args.tolerance else "  > tolerance!"

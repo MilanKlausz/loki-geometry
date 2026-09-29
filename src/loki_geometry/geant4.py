@@ -1,20 +1,24 @@
 """
 Python port of the pixel centre calculation of the LOKI Geant4 geometry
-(dgcode_projects/LOKI/G4GeoLoki: AimHelper::getPixelCentreCoordinates and the
-BcsBanks / BcsPack / BcsTube / PixelatedBanks helpers it uses), so that the
-Geant4 pixel positions can be computed without the dgcode environment.
+package G4GeoLoki (https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki):
+AimHelper::getPixelCentreCoordinates and the BcsBanks / BcsPack / BcsTube /
+PixelatedBanks helpers it uses, so that the Geant4 pixel positions can be
+computed in Python alone.
 
 Only the default LOKI setup is ported (no Larmor 2022 experiment, new tube
 numbering). Units: mm, radians internally. Coordinates: x horizontal (positive
 left, beam's view), y up, z along the beam, origin at the sample.
 
-Validated against `sb_loki_info -p <pixel>` output (see _SB_LOKI_INFO_REFERENCE
-and validate()).
+Validated against the output of `sb_loki_info -p <pixel>` (the pixel info
+command of G4GeoLoki's LOKI project, see _SB_LOKI_INFO_REFERENCE and validate()).
 
 Usage:
     from loki_geometry.geant4 import pixel_centre, pixel_id
     x, y, z = pixel_centre(pixel_id(bank_id=1, tube_id=13, straw_id=3, pixel_in_straw=0))
 """
+
+import argparse
+import sys
 
 import numpy as np
 
@@ -221,13 +225,33 @@ def _bank_position(b, axis, rear_bank_distance=REAR_BANK_DISTANCE):
 
 
 # ---------------- PixelatedBanks / AimHelper ----------------
+def _check_pixels_per_straw(straw_pixel_number):
+    if int(straw_pixel_number) != straw_pixel_number or straw_pixel_number < 1:
+        raise ValueError(f"pixels per straw must be a positive integer, not {straw_pixel_number}")
+
+
+def _check_range(name, value, size):
+    if not 0 <= value < size:
+        raise ValueError(f"{name} {value} out of range 0 .. {size - 1}")
+
+
 def bank_pixel_offset(b, straw_pixel_number=STRAW_PIXEL_NUMBER):
     return sum(PACKS[i] * 8 * 7 * straw_pixel_number for i in range(b))
+
+
+def total_pixels(straw_pixel_number=STRAW_PIXEL_NUMBER):
+    """Number of pixels of all banks (1,605,632 with 256 pixels per straw)."""
+    return bank_pixel_offset(len(PACKS), straw_pixel_number)
 
 
 def pixel_id(bank_id, tube_id, straw_id, pixel_in_straw, straw_pixel_number=STRAW_PIXEL_NUMBER):
     """Zero-based Geant4 pixel id (NeXus/ICD detector_number = this + 1).
     tube_id: Geant4 (new) tube numbering; tubes 0 .. 2*packs-1 are the front layer rows."""
+    _check_pixels_per_straw(straw_pixel_number)
+    _check_range("bank id", bank_id, len(PACKS))
+    _check_range("tube id", tube_id, PACKS[bank_id] * 8)
+    _check_range("straw id", straw_id, 7)
+    _check_range("pixel in straw", pixel_in_straw, straw_pixel_number)
     return (
         bank_pixel_offset(bank_id, straw_pixel_number)
         + (tube_id * 7 + straw_id) * straw_pixel_number
@@ -243,6 +267,8 @@ def pixel_centre(
     pixel, straw_pixel_number=STRAW_PIXEL_NUMBER, rear_bank_distance=REAR_BANK_DISTANCE
 ):
     """Port of AimHelper::getPixelCentreCoordinates (new tube numbering, not Larmor 2022)."""
+    _check_pixels_per_straw(straw_pixel_number)
+    _check_range("pixel id", pixel, total_pixels(straw_pixel_number))
     b = next(i for i in c.BANK_IDS if pixel < bank_pixel_offset(i + 1, straw_pixel_number))
     in_bank = pixel - bank_pixel_offset(b, straw_pixel_number)
     tube = in_bank // (straw_pixel_number * 7)
@@ -314,7 +340,11 @@ def bank_corners(
     The points are the straw ENDS on the tube axis (centre straw, moved half a
     pixel outwards from the first / last pixel centre) of the corner tubes:
     [front layer top tube, back layer top tube, front layer bottom tube,
-    back layer bottom tube]; 'A' = first pixel end, 'B' = last pixel end."""
+    back layer bottom tube]; 'A' = first pixel end, 'B' = last pixel end.
+    The straw ends do not depend on the number of pixels per straw; with 1 pixel
+    per straw they are computed with 2 (a single pixel centre gives no direction)."""
+    _check_pixels_per_straw(straw_pixel_number)
+    straw_pixel_number = max(straw_pixel_number, 2)
     rows = PACKS[bank_id] * 2  # tubes per layer
     corner_tubes = [0, 3 * rows, rows - 1, 4 * rows - 1]
     centre_straw = 3
@@ -340,7 +370,7 @@ def bank_corners(
     return {"A": a_points, "B": b_points, "num_tubes": PACKS[bank_id] * 8}
 
 
-# Pixel centres printed by `sb_loki_info --nominal_source_sample_distance_meters 0 -p <pixel>` (Milán's notes)
+# Pixel centres printed by `sb_loki_info --nominal_source_sample_distance_meters 0 -p <pixel>`
 _SB_LOKI_INFO_REFERENCE = {
     425472: (498.046875, 342.877351, 2935.976184),
     425727: (-498.046875, 342.877351, 2935.976184),
@@ -372,10 +402,20 @@ def validate(tolerance=1e-5):
     return worst
 
 
-def main():
-    """Command line entry point (loki-geant4-validate)."""
-    print(f"Largest deviation from the sb_loki_info reference values: {validate():.2e} mm")
+def main(argv=None):
+    """Command line entry point (loki-geant4-validate). Returns 1 if the port
+    deviates from the sb_loki_info reference values by more than the tolerance."""
+    parser = argparse.ArgumentParser(
+        description="Validate the Python port of the Geant4 pixel centres against sb_loki_info values."
+    )
+    parser.add_argument(
+        "--tolerance", type=float, default=1e-5, help="[mm] largest accepted deviation"
+    )
+    args = parser.parse_args(argv)
+    worst = validate(args.tolerance)
+    print(f"Largest deviation from the sb_loki_info reference values: {worst:.2e} mm")
+    return 0 if worst <= args.tolerance else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

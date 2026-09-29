@@ -4,6 +4,7 @@ distances, angles and offsets (drawing SI-7615-463 / Geant4, see
 constants.py), and compare them with REFERENCE_BANKS_DATA.
 """
 
+import argparse
 import math as m
 import pprint
 import sys
@@ -87,7 +88,7 @@ class Bank:
     def _apply_vertical_bank_rotation(self):
         """Rotates the bank by -90 degrees around the Z-axis if it's a vertical bank."""
         if self.isVerticalBank:
-            # Standard CCW 90-degree rotation around Z-axis
+            # Clockwise 90-degree rotation around the Z-axis (-90 degrees)
             # For row-vector multiplication (v @ M), we need M.T.
             z_rotation_matrix_standard = Bank.rotation_matrix(-m.radians(90), "z")
             self.positionA = np.dot(self.positionA, z_rotation_matrix_standard.T)
@@ -174,7 +175,7 @@ class Detectors:
             self.banks[i] = Bank(i)
 
     def print_formatted_data(self):
-        """Returns the detector data as a dictionary matching the reference format."""
+        """Print the corner data in the REFERENCE_BANKS_DATA format."""
         bank_data = {}
         for bank_id, bank_instance in self.banks.items():
             # Use existing data as template, make a copy to avoid modifying the original
@@ -191,11 +192,12 @@ class Detectors:
         # Use pprint to preserve tuples () and integer keys in the console output
         pprint.pprint(formatted_output, sort_dicts=False, indent=4)
 
-    # reference data from the generate-nexus repo (also serving as template for output)
+    # the intended corners (also serving as template for the output)
     _REFERENCE_BANKS_DATA = REFERENCE_BANKS_DATA
 
 
 def compare_arrays(arr1, arr2, tolerance=1.0):
+    """Print whether two arrays agree within tolerance [mm]; returns True if they do."""
     arr1, arr2 = np.array(arr1), np.array(arr2)
     diff = np.abs(arr1 - arr2)
     if np.any(diff > tolerance):
@@ -204,12 +206,16 @@ def compare_arrays(arr1, arr2, tolerance=1.0):
         print(f"Indices exceeding tolerance: {np.argwhere(diff > tolerance).tolist()}")
         print(f"Array 1: {arr1}")
         print(f"Array 2: {arr2}")
-    else:
-        print(f"Arrays match within tolerance ({tolerance} mm).")
+        return False
+    print(f"Arrays match within tolerance ({tolerance} mm).")
+    return True
 
 
 def main(bankIds_to_process):
+    """Compare the rebuilt corners of the given banks with REFERENCE_BANKS_DATA;
+    returns True if all agree within 1 mm."""
     detectors = Detectors()
+    all_match = True
 
     # TODO this comparison could be part of the Detector class
     for bankId in bankIds_to_process:
@@ -220,20 +226,29 @@ def main(bankIds_to_process):
 
         tolerance = 1  # [mm]
         print(f"\nComparing bank {bankId} position A to reference values:")
-        compare_arrays(positionA, reference_banks_data[bankId]["A"], tolerance)
+        all_match &= compare_arrays(positionA, reference_banks_data[bankId]["A"], tolerance)
 
         print(f"\nComparing bank {bankId} position B to reference values:")
-        compare_arrays(positionB, reference_banks_data[bankId]["B"], tolerance)
-
-    # Generate and print data structure matching the reference template
-    # detectors.print_formatted_data()
+        all_match &= compare_arrays(positionB, reference_banks_data[bankId]["B"], tolerance)
+    return all_match
 
 
-def cli():
-    """Command line entry point (loki-nominal-corners [bank_id])."""
-    bankIds = [int(sys.argv[1])] if len(sys.argv) == 2 else list(c.BANK_IDS)
-    main(bankIds)
+def cli(argv=None):
+    """Command line entry point (loki-nominal-corners [bank_id ...])."""
+    parser = argparse.ArgumentParser(
+        description="Rebuild the intended bank corners from the nominal distances, angles and "
+        "offsets, and compare them with REFERENCE_BANKS_DATA."
+    )
+    # (no choices=: with nargs="*" argparse < 3.12 rejects the empty default)
+    parser.add_argument(
+        "bank_ids", type=int, nargs="*", metavar="bank_id", help="banks to compare (default: all)"
+    )
+    args = parser.parse_args(argv)
+    unknown = sorted(set(args.bank_ids) - set(c.BANK_IDS))
+    if unknown:
+        parser.error(f"unknown bank ids {unknown} (choose from {list(c.BANK_IDS)})")
+    return 0 if main(args.bank_ids or list(c.BANK_IDS)) else 1
 
 
 if __name__ == "__main__":
-    cli()
+    sys.exit(cli())

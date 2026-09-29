@@ -1,3 +1,18 @@
+"""
+The intended corner positions of the LOKI detector banks (exact CAD values):
+REFERENCE_BANKS_DATA, the "intended" geometry of the comparisons in
+calibration.py and the corners currently used by nexus_json.py.
+
+Format, per bank id [mm]:
+  'A': [front layer top tube, back layer top tube, front layer bottom tube,
+        back layer bottom tube] at the FIRST pixel end of the straws, on the tube
+        axis ("top/bottom" = lowest/highest local tube id),
+  'B': the same 4 tubes at the LAST pixel end,
+  'num_tubes': tubes in the bank; the other keys (name, topic, source, ...)
+  are kept for the instrument file and not used by this package.
+convert_reference_data_to_calibration_data turns it into calibration data.
+"""
+
 REFERENCE_BANKS_DATA = {
     0: {
         "A": [

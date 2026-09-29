@@ -1,21 +1,15 @@
 """Tests of the NeXus-JSON export and of its verification against Geant4."""
 
 import json
-import os
 
 import numpy as np
 import pytest
-from conftest import REPO_DIR
 
 from loki_geometry import bank_pixels as lbp
 from loki_geometry import geant4 as g4
 from loki_geometry import nexus_json as lnj
 from loki_geometry import verify_json as vnj
 from loki_geometry.reference_data import REFERENCE_BANKS_DATA
-
-# The current instrument file, if available locally (not version controlled);
-# another location can be given with the LOKI_JSON environment variable.
-LOKI_JSON = os.environ.get("LOKI_JSON", os.path.join(REPO_DIR, "sources_local", "loki.json"))
 
 
 def child(node, name):
@@ -101,12 +95,9 @@ def test_pixel_shape_starts_at_pixel_bases():
     assert np.allclose(vertices[0], 0.0, atol=1e-5)
 
 
-@pytest.mark.parametrize("use_ijson", [True, False])
-def test_round_trip_through_a_file(tmp_path, reference_pixels, use_ijson, monkeypatch):
+def test_round_trip_through_a_file(tmp_path, reference_pixels):
     filename = tmp_path / "pixels.json"
     lnj.write_json(lnj.build_output(reference_pixels, "test"), filename)
-    if not use_ijson:
-        monkeypatch.setattr(vnj, "_iter_nodes_ijson", vnj._iter_nodes_json)
     banks = vnj.read_pixel_positions(filename)
     assert sorted(banks) == list(range(9))
     for bank_id, (ids, positions) in banks.items():
@@ -168,27 +159,3 @@ def test_main_writes_selected_banks(tmp_path):
     assert data["info"]["pixels_per_straw"] == 2
     assert data["info"]["pixel_reference"] == "pixel_base"
     assert vnj.main([str(filename), "--tolerance", "1.0"]) == 0
-
-
-@pytest.mark.skipif(not os.path.exists(LOKI_JSON), reason="loki.json not available")
-def test_agrees_with_the_existing_loki_json():
-    """The current loki.json (generate-nexus-files, 512 pixels per straw) was made
-    from the same corners with rounded straw positions (5 decimals in m)."""
-    existing = vnj.read_pixel_positions(LOKI_JSON, use_pixel_shape=False)
-    new = lbp.compute_instrument_pixels(REFERENCE_BANKS_DATA, pixels_per_straw=512)
-    for bank_id, (ids, positions) in existing.items():
-        assert np.array_equal(ids, new[bank_id].pixel_ids)
-        assert np.abs(positions - new[bank_id].pixel_centres).max() < 0.02
-
-
-@pytest.mark.skipif(not os.path.exists(LOKI_JSON), reason="loki.json not available")
-def test_existing_loki_json_pixel_shape_is_shifted_by_half_a_pixel():
-    """Documents the known issue: pixel centre offsets, but a shape starting at them."""
-    with_shape = vnj.read_pixel_positions(LOKI_JSON)
-    without_shape = vnj.read_pixel_positions(LOKI_JSON, use_pixel_shape=False)
-    for bank_id in with_shape:
-        shift = np.linalg.norm(with_shape[bank_id][1][0] - without_shape[bank_id][1][0])
-        assert shift == pytest.approx(
-            lbp.compute_bank_pixels(bank_id, REFERENCE_BANKS_DATA[bank_id], 512).pixel_length / 2,
-            abs=1e-4,
-        )

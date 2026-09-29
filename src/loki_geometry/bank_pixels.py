@@ -2,10 +2,10 @@
 Pixel positions of the LOKI detector banks from their 8 corner positions.
 
 This is the geometry core used to produce the pixel data of the NeXus/JSON
-instrument description (see nexus_json.py). It follows the simple vector
-approach of generate-nexus-files (examples/loki/LOKI_geometry.py), with the
-straw layout inside the tubes taken from the Geant4 geometry
-(dgcode_projects/LOKI/G4GeoLoki), which it reproduces exactly (see the tests).
+instrument description (see nexus_json.py). The tube grid is built with
+simple vector steps between the corners, and the straw layout inside the tubes
+is taken from the LOKI Geant4 geometry (G4GeoLoki, https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki),
+which it reproduces exactly (see the tests).
 
 Input: the 8 corners of a bank, in the REFERENCE_BANKS_DATA format [mm]:
   'A': [front layer top tube, back layer top tube, front layer bottom tube,
@@ -31,7 +31,11 @@ rotated copies. In a frame of (row direction, depth direction) the straw
 pattern and the layer step of such a bank are mirrored along the row
 direction. Whether a bank is mirrored is derived from its corners: the layer
 step points towards higher tube ids in mirrored banks, towards lower ones in
-the others.
+the others. It must agree with MIRRORED_BANK_IDS (checked).
+
+Only A[0], A[1], A[2] and B[0] define the model; the other corners must be
+consistent with it (A[3] = A[1] + A[2] - A[0], B[i] - A[i] = B[0] - A[0])
+within CORNER_TOLERANCE, otherwise a ValueError is raised.
 
 Bank position (origin of the local offsets): the corner A[0] itself, i.e. the
 FIRST PIXEL END of tube 0 (front layer, top tube, or leftmost tube in vertical
@@ -76,6 +80,7 @@ __all__ = [
     "BankFrame",
     "BankPixels",
     "CENTRE_STRAW",
+    "CORNER_TOLERANCE",
     "DEFAULT_PIXELS_PER_STRAW",
     "FIRST_PIXEL_ID",
     "MIRRORED_BANK_IDS",
@@ -100,6 +105,7 @@ __all__ = [
 
 FIRST_PIXEL_ID = 1  # detector_number of the first pixel of bank 0 (ICD numbering)
 MIRRORED_BANK_IDS = UPSIDE_DOWN_BANK_IDS  # only used as a cross-check: derived from the corners
+CORNER_TOLERANCE = 0.1  # [mm] accepted inconsistency of the corners (rounding)
 PIXEL_CENTRE = "pixel_centre"  # pixel offsets point to the pixel centres
 PIXEL_BASE = "pixel_base"  # pixel offsets point to the centre of the pixel's first face
 PIXEL_REFERENCES = (PIXEL_CENTRE, PIXEL_BASE)
@@ -167,13 +173,24 @@ class BankFrame:
     rows: int
 
     @classmethod
-    def from_corners(cls, corners, rows):
-        """Build the frame from corners in the REFERENCE_BANKS_DATA format."""
+    def from_corners(cls, corners, rows, tolerance=CORNER_TOLERANCE):
+        """Build the frame from corners in the REFERENCE_BANKS_DATA format.
+        Raises ValueError if the corners do not form a parallelepiped of parallel
+        straws within tolerance [mm] (see the module docstring)."""
         a = np.asarray(corners["A"], dtype=float)
         b = np.asarray(corners["B"], dtype=float)
         if a.shape != (4, 3) or b.shape != (4, 3):
             raise ValueError("corners must contain 4 'A' and 4 'B' points with 3 coordinates each")
         straw_vector = b[0] - a[0]
+        deviation = max(
+            np.abs(a[3] - (a[1] + a[2] - a[0])).max(),
+            np.abs((b - a) - straw_vector).max(),
+        )
+        if deviation > tolerance:
+            raise ValueError(
+                f"inconsistent corners: A[3] or B[1..3] deviate by {deviation:.3f} mm from the "
+                f"bank defined by A[0], A[1], A[2], B[0] (tolerance {tolerance} mm)"
+            )
         along = _unit(straw_vector)
         row_step = (a[2] - a[0]) / (rows - 1)
         layer_step = (a[1] - a[0]) / (LAYERS_PER_BANK - 1)
@@ -326,12 +343,21 @@ def compute_bank_pixels(
     pixel_reference=PIXEL_CENTRE,
 ):
     """Pixel data of a bank from its corners (REFERENCE_BANKS_DATA format)."""
+    if int(pixels_per_straw) != pixels_per_straw or pixels_per_straw < 1:
+        raise ValueError(f"pixels_per_straw must be a positive integer, not {pixels_per_straw}")
+    pixels_per_straw = int(pixels_per_straw)
     rows = tubes_per_layer(bank_id)
     if "num_tubes" in corners and corners["num_tubes"] != TUBES_PER_BANK[bank_id]:
         raise ValueError(
             f"bank {bank_id}: num_tubes {corners['num_tubes']} != {TUBES_PER_BANK[bank_id]}"
         )
     frame = BankFrame.from_corners(corners, rows)
+    if frame.mirrored != (bank_id in MIRRORED_BANK_IDS):
+        raise ValueError(
+            f"bank {bank_id}: the corners give a {'mirrored' if frame.mirrored else 'normal'} "
+            f"straw pattern, expected {'mirrored' if bank_id in MIRRORED_BANK_IDS else 'normal'} "
+            "(corners in the wrong order?)"
+        )
     return BankPixels(
         bank_id,
         frame,

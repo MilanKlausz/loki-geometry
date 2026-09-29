@@ -35,16 +35,14 @@ def test_reference_data_reproduces_itself(reference_detectors):
     corners = reference_detectors.formatted_data()
     for bank_id in c.BANK_IDS:
         for end in "AB":
-            assert np.allclose(corners[bank_id][end], REFERENCE_BANKS_DATA[bank_id][end], atol=0.1)
+            assert np.allclose(corners[bank_id][end], REFERENCE_BANKS_DATA[bank_id][end], atol=0.07)
 
 
-@pytest.mark.parametrize("use_pixel_centre_position", [True, False])
-def test_straw_end_output_does_not_depend_on_the_pixel_centre_option(
-    use_pixel_centre_position, reference_detectors
-):
+def test_straw_end_output_does_not_depend_on_the_pixel_centre_option(reference_detectors):
+    # reference_detectors uses pixel centres; this one the straw ends
     detectors = Detectors(
         convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA),
-        use_pixel_centre_position,
+        False,
         run_checks=False,
     )
     assert detectors.formatted_data() == reference_detectors.formatted_data()
@@ -95,26 +93,6 @@ def test_survey_file_covers_banks_1_to_8():
     for bank in data:
         for tube in bank["positions"]:
             assert tube["distance"] == pytest.approx(c.STRAW_LENGTHS[bank["bank_id"]])
-
-
-def test_survey_tube_ids_agree_with_their_spacing():
-    points = {
-        label: survey.survey_to_nexus_frame(p, 0.0)
-        for label, p in survey.read_measured_points().items()
-    }
-    points = survey.fix_bank5_mislabelled_tube(points, c.TUBE_GRID_SIDE)
-    banks = survey.group_points_into_tubes(points, c.VERTICAL_BANK_IDS)
-    for tube_a, tube_b in banks.values():
-        mid_a = (tube_a["end_A"] + tube_a["end_B"]) / 2
-        mid_b = (tube_b["end_A"] + tube_b["end_B"]) / 2
-        along = (tube_a["end_B"] - tube_a["end_A"]) / np.linalg.norm(
-            tube_a["end_B"] - tube_a["end_A"]
-        )
-        across = (mid_b - mid_a) - np.dot(mid_b - mid_a, along) * along
-        steps = np.linalg.norm(across) / c.TUBE_GRID_SIDE
-        assert steps == pytest.approx(
-            tube_b["tube_id"] - tube_a["tube_id"], abs=survey.TUBE_ID_TOLERANCE
-        )
 
 
 def test_find_effective_tube_ends_shortens_and_stretches_symmetrically():

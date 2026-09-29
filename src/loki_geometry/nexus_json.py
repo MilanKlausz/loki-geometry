@@ -10,6 +10,7 @@ its NXdetector group, in the same structure as in loki.json:
                       pixel reference point (see below)
   - x/y/z_pixel_offset  offsets of the pixel reference points from the bank position [m]
   - transformations   one translation from the sample to the bank position [m]
+                      (banks 1-8; bank 0 has none, see below)
   - depends_on
 Bank position: the corner A[0] of the bank, i.e. the FIRST PIXEL END of tube 0
 (front layer, top tube, or leftmost tube in vertical banks) on the tube axis,
@@ -34,8 +35,9 @@ attributes of the detector group) are not geometry and stay as they are.
 
 Output file layout:
   {"info": {...},
-   "loki_detector_0": <group>, ..., "loki_detector_8": <group>,
-   "detector_carriage_zero": <translation dataset>}
+   "loki_detector_0": <group>, "detector_carriage_zero": <translation dataset>,
+   "loki_detector_1": <group>, ..., "loki_detector_8": <group>}
+(detector_carriage_zero only if bank 0 is written.)
 
 Usage:
   loki-pixel-json -o loki_detector_pixels.json [--pixels-per-straw 256] [--pixel-reference pixel_base]
@@ -45,6 +47,7 @@ The corners currently come from REFERENCE_BANKS_DATA (the intended geometry).
 
 import argparse
 import json
+import sys
 
 import numpy as np
 
@@ -54,7 +57,7 @@ from .bank_pixels import (
     compute_instrument_pixels,
     pixel_reference_fraction,
 )
-from .constants import DEFAULT_PIXELS_PER_STRAW, STRAW_RADIUS
+from .constants import BANK_IDS, DEFAULT_PIXELS_PER_STRAW, STRAW_RADIUS
 
 MM_TO_M = 1e-3
 LENGTH_UNIT = "m"
@@ -242,6 +245,13 @@ def reference_corners():
     return dict(REFERENCE_BANKS_DATA)
 
 
+def _positive_int(text):
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, not {text}")
+    return value
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Write the LOKI detector pixel geometry as NeXus-JSON nodes."
@@ -249,12 +259,17 @@ def main(argv=None):
     parser.add_argument(
         "-o", "--output", default="loki_detector_pixels.json", help="output JSON file"
     )
-    parser.add_argument("--pixels-per-straw", type=int, default=DEFAULT_PIXELS_PER_STRAW)
+    parser.add_argument("--pixels-per-straw", type=_positive_int, default=DEFAULT_PIXELS_PER_STRAW)
     parser.add_argument(
         "--decimals", type=int, default=DEFAULT_DECIMALS, help="rounding of the coordinates in [m]"
     )
     parser.add_argument(
-        "--banks", type=int, nargs="*", default=None, help="only these banks (default: all)"
+        "--banks",
+        type=int,
+        nargs="+",
+        choices=BANK_IDS,
+        default=None,
+        help="only these banks (default: all)",
     )
     parser.add_argument(
         "--pixel-reference",
@@ -277,7 +292,8 @@ def main(argv=None):
         f"Written {args.output}: {len(instrument_pixels)} banks, {total} pixels, "
         f"{args.pixels_per_straw} pixels per straw, pixel reference: {args.pixel_reference}"
     )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

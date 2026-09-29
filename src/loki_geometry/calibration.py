@@ -1,22 +1,24 @@
 """
 LOKI detector bank calibration: calculate the 8 corner positions of each
-detector bank (the input of the JSON/NeXus geometry generator in the
-generate-nexus-files repo, examples/loki/detector_banks_geo.py) from the
-positions of two tubes of the bank.
+detector bank (the input of the pixel geometry, bank_pixels.py / nexus_json.py)
+from the positions of two tubes of the bank.
 
 Usage
 -----
-  loki-calibrate [--data measured|reference|example]
+  loki-calibrate [--data measured|reference|example] [--survey-file FILE]
                  [--sample-to-window-distance D] [--verbose]
                  [--compare-to-intended] [--print]
-  --data measured   survey (SAM-606), via survey.py (default)
+  --data measured   a survey file, via survey.py (default; the SAM-606 survey
+                    unless --survey-file is given)
   --data reference  the intended geometry (REFERENCE_BANKS_DATA) -> must
-                    reproduce it (self test of the algorithm)
+                    reproduce it (self test of the algorithm, the corners are
+                    compared with REFERENCE_BANKS_DATA)
   --data example    Geant4 positions from geant4_example_data.py
   --verbose         print the quality report (see Detectors.print_quality_report)
   --compare-to-intended  print the corner shifts from the intended banks
+  --print           print the corners (straw ends) in the REFERENCE_BANKS_DATA format
 The "intended" geometry = the banks built from REFERENCE_BANKS_DATA (exact CAD
-values, also used by the JSON generator). The nominal Geant4 table values in
+values, also used by nexus_json.py). The nominal Geant4 table values in
 Detectors (tilt angles, distances) are rounded CAD values; they are printed
 for information.
 
@@ -37,6 +39,9 @@ measured physical tube ends include ~15 mm of end electronics at both ends, the
 Geant4 end pixel centres are half a pixel inside): the algorithm only uses the
 midpoint and the direction of each tube, which such errors do not change. The
 nominal (effective) straw length of the bank is used for the tube length.
+The input is checked (ValueError): the two tube ids must differ, the two tubes
+must point the same way, and the layer normal must point away from the sample
+(swapped first / last pixel ends would put the back layers in front).
 
 Output
 ------
@@ -78,6 +83,7 @@ sample-bank distances against the intended values.
 """
 
 import pprint
+import sys
 
 import numpy as np
 
@@ -105,7 +111,9 @@ class Detectors:
     upside_down_bank_ids = c.UPSIDE_DOWN_BANK_IDS
     straw_pixel_number = c.DEFAULT_PIXELS_PER_STRAW
 
-    REFERENCE_BANKS_DATA = REFERENCE_BANKS_DATA  # reference data from the generate-nexus repo (also serving as template for output)
+    REFERENCE_BANKS_DATA = (
+        REFERENCE_BANKS_DATA  # the intended corners (also serving as template for the output)
+    )
 
     def __init__(
         self,
@@ -119,7 +127,7 @@ class Detectors:
         intended: what the banks are compared with (tilt angles, sample-bank
           distances, front face centres, corner shifts):
           "reference" (default) - the geometry built from REFERENCE_BANKS_DATA
-                                  (exact CAD values, used by the JSON generator),
+                                  (exact CAD values, used by nexus_json.py),
           a Detectors object    - that geometry,
           None                  - the nominal Geant4 table values below
                                   (intended_bank_tilt_angles, intended_bank_distances, ...).
@@ -165,10 +173,9 @@ class Detectors:
         return sorted([id for id in self.banks.keys()])
 
     def formatted_data(self, as_straw_ends=True, decimals=2):
-        """The corner data as a dictionary in the REFERENCE_BANKS_DATA format
-        (= det_banks_data in generate-nexus-files/examples/loki/detector_banks_geo.py).
+        """The corner data as a dictionary in the REFERENCE_BANKS_DATA format.
 
-        as_straw_ends: the JSON generator expects the 'A'/'B' points at the
+        as_straw_ends: bank_pixels.py expects the 'A'/'B' points at the
           STRAW ENDS (it places the pixel centres at (j + 0.5) * L / N from 'A'),
           like the values in REFERENCE_BANKS_DATA, while positionA/B are pixel
           centres. With True (default) the points are moved back half a pixel
@@ -193,18 +200,23 @@ class Detectors:
         # Use pprint to preserve tuples () and integer keys in the console output
         pprint.pprint(self.formatted_data(as_straw_ends), sort_dicts=False, indent=4)
 
-    def verify_positions_against_reference_data(self):
+    def verify_positions_against_reference_data(self, tolerance=1.0):
+        """Compare the corners (as straw ends, like REFERENCE_BANKS_DATA) with
+        REFERENCE_BANKS_DATA; prints the result per bank and returns the largest
+        difference of a coordinate [mm]."""
+        corners = self.formatted_data(decimals=6)
+        worst = 0.0
         for bank_id in self.bank_ids:
-            tolerance = 1  # [mm] # NOTE this could be a input variable
-            print(f"\nComparing bank {bank_id} position A to reference values:")
-            self.compare_arrays(
-                self.banks[bank_id].positionA, self.REFERENCE_BANKS_DATA[bank_id]["A"], tolerance
-            )
-
-            print(f"\nComparing bank {bank_id} position B to reference values:")
-            self.compare_arrays(
-                self.banks[bank_id].positionB, self.REFERENCE_BANKS_DATA[bank_id]["B"], tolerance
-            )
+            for end in ("A", "B"):
+                print(f"\nComparing bank {bank_id} position {end} to reference values:")
+                self.compare_arrays(
+                    corners[bank_id][end], self.REFERENCE_BANKS_DATA[bank_id][end], tolerance
+                )
+                difference = np.abs(
+                    np.subtract(corners[bank_id][end], self.REFERENCE_BANKS_DATA[bank_id][end])
+                )
+                worst = max(worst, float(difference.max()))
+        return worst
 
     @staticmethod
     def compare_arrays(arr1, arr2, tolerance=1.0):
@@ -264,7 +276,7 @@ class Detectors:
             tilt, intended_tilt = self.tilt_angle(bank_id), self.intended_tilt(bank_id)
             print(
                 f"  tilt angle: {tilt:.3f} deg, intended {intended_tilt:.3f} deg ({self.intended_label}; Geant4 nominal "
-                f"{self.intended_bank_tilt_angles[bank_id]}), difference {tilt - intended_tilt:+.3f} deg"
+                f"{self.intended_bank_tilt_angles[bank_id]:.3f}), difference {tilt - intended_tilt:+.3f} deg"
             )
             intended_centre = self.intended_centre(bank_id)
             intended_distance = np.linalg.norm(intended_centre)
@@ -522,6 +534,10 @@ class Bank:
         # --- Step 1: the input tubes, ordered by local tube id --------------
         # tube_a = the tube with the lower id (closer to tube 0), tube_b = the other
         tube_a, tube_b = sorted(calibration_bank_data["positions"], key=lambda pos: pos["tube_id"])
+        if tube_a["tube_id"] == tube_b["tube_id"]:
+            raise ValueError(
+                f"bank {self.bank_id}: the two input tubes have the same id {tube_a['tube_id']}"
+            )
         self.input_tubes = []  # kept for the quality checks
         for tube in (tube_a, tube_b):
             first = np.array(tube["first_pixel_end"], dtype=float)
@@ -542,6 +558,11 @@ class Bank:
         # effect of the measurement uncertainty of the end points.
         dir_a = _unit(ta["first"] - ta["last"])
         dir_b = _unit(tb["first"] - tb["last"])
+        if np.dot(dir_a, dir_b) <= 0:
+            raise ValueError(
+                f"bank {self.bank_id}: the input tubes {ta['tube_id']} and {tb['tube_id']} point in "
+                "opposite directions (first / last pixel ends swapped in one of them?)"
+            )
         self.quality["tube_angle_deg"] = np.degrees(
             np.arccos(np.clip(np.dot(dir_a, dir_b), -1.0, 1.0))
         )
@@ -572,6 +593,13 @@ class Bank:
         # --- Step 6: normal of the layers, completing the orthonormal basis --
         # Same convention as before: along x perpendicular_tubes.
         n = np.cross(u, w)
+        # n must point away from the sample (towards the back layers); it
+        # points towards it if the first / last pixel ends are swapped (u flipped)
+        if np.dot(n, centroid) <= 0:
+            raise ValueError(
+                f"bank {self.bank_id}: the layer normal points towards the sample; "
+                "first / last pixel ends swapped in the input?"
+            )
 
         self.vector_along_tubes = u
         self.vector_perpendicular_tubes = w
@@ -708,7 +736,7 @@ def _unit(vector):
     return vector / np.linalg.norm(vector)
 
 
-def main():
+def main(argv=None):
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -718,8 +746,14 @@ def main():
         "--data",
         choices=["measured", "reference", "example"],
         default="measured",
-        help="calibration input: survey measurement (SAM-606), the intended geometry "
+        help="calibration input: a survey measurement (see --survey-file), the intended geometry "
         "(REFERENCE_BANKS_DATA) or the Geant4 example data (default: measured)",
+    )
+    parser.add_argument(
+        "--survey-file",
+        default=None,
+        help="survey file for --data measured, must have an entry in survey_files.py "
+        "(default: the SAM-606 survey)",
     )
     parser.add_argument(
         "--sample-to-window-distance",
@@ -738,28 +772,32 @@ def main():
         "--print",
         dest="print_data",
         action="store_true",
-        help="print the corner data (straw ends) in the REFERENCE_BANKS_DATA / det_banks_data format",
+        help="print the corner data (straw ends) in the REFERENCE_BANKS_DATA format",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    for option in ("survey_file", "sample_to_window_distance"):
+        if getattr(args, option) is not None and args.data != "measured":
+            parser.error(f"--{option.replace('_', '-')} only applies to --data measured")
 
     if args.data == "reference":
-        print("Using reference data from generate-nexus repo as calibration data")
+        print("Using the intended geometry (REFERENCE_BANKS_DATA) as calibration data")
         calibration_data = convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA)
     elif args.data == "example":
         print("Using example calibration data from Geant4 model")
         calibration_data = example_calibration_data
     else:
-        print("Using the survey measurement (SAM-606) as calibration data")
-        from .survey import SAMPLE_TO_TANK_WINDOW_DISTANCE, get_measured_calibration_data
+        from .survey import get_measured_calibration_data
+        from .survey_files import DEFAULT_SURVEY_FILE
 
-        distance = (
-            SAMPLE_TO_TANK_WINDOW_DISTANCE
-            if args.sample_to_window_distance is None
-            else args.sample_to_window_distance
-        )
-        calibration_data = get_measured_calibration_data(
-            sample_to_window_distance=distance, verbose=args.verbose
-        )
+        survey_file = args.survey_file or DEFAULT_SURVEY_FILE
+        print(f"Using the survey {survey_file} as calibration data")
+
+        try:
+            calibration_data = get_measured_calibration_data(
+                survey_file, args.sample_to_window_distance, verbose=args.verbose
+            )
+        except ValueError as error:
+            parser.error(str(error))
 
     detectors = Detectors(calibration_data, use_pixel_centre_position=True, verbose=args.verbose)
 
@@ -769,8 +807,15 @@ def main():
     if args.print_data:
         detectors.print_formatted_data()
 
-    # detectors.verify_positions_against_reference_data() #TODO temp commented
+    if args.data == "reference":
+        # self test: the corners must reproduce REFERENCE_BANKS_DATA (the
+        # differences are the rounding of the CAD values, < 0.1 mm)
+        tolerance = 0.1
+        worst = detectors.verify_positions_against_reference_data(tolerance)
+        print(f"\nSelf test: largest difference from REFERENCE_BANKS_DATA {worst:.3f} mm")
+        return 0 if worst <= tolerance else 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

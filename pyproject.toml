@@ -14,9 +14,8 @@ license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 
 [project.optional-dependencies]
-json = ["ijson"]            # streaming of large JSON files in loki-verify-json
-test = ["pytest", "ijson"]
-dev = ["pytest", "ijson", "ruff"]
+test = ["pytest"]
+dev = ["pytest", "ruff"]
 
 [project.scripts]
 loki-calibrate = "loki_geometry.calibration:main"

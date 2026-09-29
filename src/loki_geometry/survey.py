@@ -1,25 +1,24 @@
 """
-Convert the survey (SAM-606) measurement of the LOKI detector tube ends into the
-calibration-data format used by calibration.py (the format of
-geant4_example_data.py).
+Convert a survey of the LOKI detector tube ends into the calibration-data
+format used by calibration.py (the format of geant4_example_data.py).
 
 Input
 -----
-data/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt (from the SAM-606 survey)
-  One line per measured point: "<label>, X, Y, Z" [mm], in the TANK WINDOW
-  coordinate system of the survey:
-    X - along the beam (downstream positive)
-    Y - horizontal, positive to the LEFT when looking along the beam
-    Z - vertical, positive UP
-  The labels look like "C2RP16I":
-    C1 / C2 - front / middle detector carriage
-    U/D/L/R - up / down / left / right bank of the carriage
-    P<n>    - "pipe" (tube) number, the surveyors' own scheme, which does NOT
-              match our tube numbering (and is wrong in two cases, see below)
-    I / II  - the two ends of the measured tube
-  Each point is on the tube axis at the PHYSICAL end of the tube, i.e. it
-  includes the (inseparable) end electronics, not only the effective straw
-  length used in the models.
+A survey file known to survey_files.py (default: the SAM-606 survey,
+data/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt).
+  One line per measured point: "<label>, X, Y, Z" [mm], in the coordinate
+  frame of the survey. The label is the surveyors' tube label followed by the
+  end, I or II. Each point is on the tube axis at the PHYSICAL end of the tube,
+  i.e. it includes the (inseparable) end electronics, not only the effective
+  straw length used in the models.
+  What is specific to a file (the tube label map, corrections of the file and
+  its coordinate frame) is in its survey_files.py entry.
+
+Chain (get_measured_calibration_data)
+-------------------------------------
+read the points -> apply the fixes of the file -> convert to the NeXus frame
+-> group the points into tubes (label map), assign the first / last pixel ends
+-> sanity checks (verbose) -> trim the end electronics -> calibration data.
 
 Output
 ------
@@ -35,30 +34,27 @@ A list of dictionaries in the same format as example_calibration_data:
    ...]
   Coordinates are in [mm] in the NeXus/Geant4 frame used by the other scripts
   (x horizontal positive LEFT, y up, z along the beam), with the origin at the
-  sample position (see SAMPLE_TO_TANK_WINDOW_DISTANCE below).
+  sample position (see SAMPLE_TO_TANK_WINDOW_DISTANCE below, for files with a
+  frame conversion).
   The local pixel ids of a straw increase from +x to -x in horizontal banks and
   from -y to +y in vertical banks (NeXus coordinate system), so first_pixel_end
   is the +x end (horizontal banks) or the -y end (vertical banks).
 
-Bank 0 (rear bank) was NOT measured, so it is missing from the output.
+Only the banks in the label map are in the output (bank 0 was not surveyed).
 """
 
-import os
+import argparse
 import pprint
+import sys
 
 import numpy as np
 
 from . import constants as c
+from .survey_files import DEFAULT_SURVEY_FILE, survey_file_info
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-
-MEASUREMENT_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "data",
-    "ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt",
-)
 
 # Distance [mm] along the beam from the nominal sample position to the origin
 # of the survey's TANK WINDOW coordinate system (window is downstream of the
@@ -68,42 +64,6 @@ MEASUREMENT_FILE = os.path.join(
 # 108.0 mm to the sapphire window; which surface is the survey origin still has
 # to be confirmed. 100 mm puts the front carriage at its intended distance.
 SAMPLE_TO_TANK_WINDOW_DISTANCE = 100.0  # [mm]
-
-# Mapping of the survey tube labels (without the I/II end suffix) to
-# (bank_id, zero-indexed local tube id).
-# Local tube id convention (the REAL numbering used in the calibration):
-#   - it counts the tubes of the FRONT layer (the one facing the sample; all
-#     surveyed tubes are in the front layer),
-#   - horizontal banks (0, 1, 3, 5, 7): 0 is the TOPmost tube,
-#   - vertical banks (2, 4, 6, 8): 0 is the LEFTmost tube (looking along the
-#     beam, i.e. the one with the largest x).
-# Identification was done by comparing the measured positions with the
-# nominal tube positions (see check_tube_ids_against_nominal, which re-checks
-# it every time the module runs).
-TUBE_LABEL_MAP = {
-    # --- middle carriage (C2) ---
-    "C2UP16": (1, 0),  # mid top, topmost tube (1st of 16 rows)
-    "C2UP3": (1, 13),  # mid top, 3rd tube from the bottom
-    "C2LP16": (2, 0),  # mid left, leftmost (outermost) tube
-    "C2LP1": (2, 11),  # mid left, rightmost (innermost) tube, 12th of 12
-    "C2DP1": (3, 0),  # mid bottom, topmost (innermost) tube
-    "C2DP16": (3, 15),  # mid bottom, bottom tube, 16th of 16
-    "C2RP1": (4, 0),  # mid right, leftmost (innermost) tube
-    "C2RP16": (4, 11),  # mid right, rightmost (outermost) tube, 12th of 12
-    # --- front carriage (C1) ---
-    # Front top: the "C1UP8" label is used for points of TWO different tubes:
-    # C1UP8I is on tube "UP9" (local id 19), C1UP8II is on tube "UP8" (local
-    # id 20). C1UP8II is replaced by an extrapolated end of tube UP9 early on
-    # (see fix_bank5_mislabelled_tube), so after that "C1UP8" means tube UP9.
-    "C1UP8": (5, 19),  # front top, tube "UP9" (9th from bottom of 28 rows)
-    "C1UP3": (5, 25),  # front top, 3rd tube from the bottom
-    "C1LP11": (6, 21),  # front left, 22nd tube from the left (of 32)
-    "C1LP1": (6, 31),  # front left, rightmost (innermost) tube
-    "C1DP1": (7, 0),  # front bottom, topmost (innermost) tube
-    "C1DP31": (7, 18),  # front bottom, 19th tube of 20 (label "31" is misleading)
-    "C1RP1": (8, 0),  # front right, leftmost (innermost) tube
-    "C1RP11": (8, 10),  # front right, 11th tube from the left (of 32)
-}
 
 # Tolerances of the sanity checks (only warnings are printed, nothing stops)
 PARALLEL_TOLERANCE_DEG = 0.5  # max angle between the 2 tubes of a bank
@@ -121,11 +81,11 @@ def _calibration_constants():
 
 
 # ---------------------------------------------------------------------------
-# Step 1: read the file and convert to our coordinate frame
+# Step 1: read the file (the fixes and the frame conversion are in survey_files.py)
 # ---------------------------------------------------------------------------
 
 
-def read_measured_points(filename=MEASUREMENT_FILE):
+def read_measured_points(filename=DEFAULT_SURVEY_FILE):
     """Read the survey txt file into {label: np.array([X, Y, Z])} (survey frame).
 
     The file has no header and no standard format, just
@@ -146,82 +106,40 @@ def read_measured_points(filename=MEASUREMENT_FILE):
     return points
 
 
-def survey_to_nexus_frame(point, sample_to_window_distance):
-    """Convert a survey point (X beam, Y left, Z up; origin at the tank window)
-    to the NeXus/Geant4 frame (x left, y up, z beam; origin at the sample).
-
-    Both frames are right-handed and the axes are just cyclically permuted:
-      x_nexus = Y_survey, y_nexus = Z_survey, z_nexus = X_survey
-    Then the origin is moved from the window to the sample position, which
-    lies upstream of the window by sample_to_window_distance."""
-    X, Y, Z = point
-    return np.array([Y, Z, X + sample_to_window_distance])
-
-
 # ---------------------------------------------------------------------------
-# Step 2: fix the bank 5 (front top) mislabelled measurement
+# Step 2: group the points into tubes and decide which end is which
 # ---------------------------------------------------------------------------
 
 
-def fix_bank5_mislabelled_tube(points, tube_tube_distance):
-    """In bank 5 the two "C1UP8" points belong to two different tubes:
-    C1UP8I is the start of tube UP9, C1UP8II is the end of tube UP8.
-
-    Assuming that the tubes of a bank are parallel (tested for the other
-    banks in check_tube_parallelism), the missing end of tube UP9 is
-    extrapolated from its measured start (C1UP8I), using the vector between
-    the two ends of the other measured tube of the bank (C1UP3I -> C1UP3II).
-    The measured C1UP8II is discarded (after a sanity check that it really is
-    one tube pitch away from the extrapolated UP9 end).
-
-    This is done at the very beginning, so that everything downstream can
-    treat bank 5 like any other bank. Operates in place on `points`."""
-    up9_start = points["C1UP8I"]
-    up3_vector = points["C1UP3II"] - points["C1UP3I"]
-    up9_end = up9_start + up3_vector  # extrapolated end of tube UP9
-
-    # Sanity check: the discarded point (end of tube UP8) should be about one
-    # tube pitch (28.4 mm) away from the extrapolated end of UP9.
-    discarded = points["C1UP8II"]
-    separation = np.linalg.norm(discarded - up9_end)
-    print(
-        f"Bank 5 fix: C1UP8II replaced by the extrapolated end of tube UP9. "
-        f"Distance of the discarded point (tube UP8) from it: {separation:.1f} mm "
-        f"(expected ~{tube_tube_distance} mm = 1 tube pitch)"
-    )
-    if abs(separation - tube_tube_distance) > TUBE_ID_TOLERANCE * tube_tube_distance:
-        print("  WARNING: that is not ~1 tube pitch, check the bank 5 assumption!")
-
-    points["C1UP8II"] = up9_end
-    return points
-
-
-# ---------------------------------------------------------------------------
-# Step 3: group the points into tubes and decide which end is which
-# ---------------------------------------------------------------------------
-
-
-def group_points_into_tubes(points, vertical_bank_ids):
-    """Group the I/II end points by tube and bank.
+def group_points_into_tubes(points, label_map, vertical_bank_ids, verbose=True):
+    """Group the I/II end points by tube and bank, using the label map of the
+    survey file ({tube label: (bank_id, tube id)}). Every point must belong to a
+    tube of the label map and every tube must have both ends (ValueError).
 
     Returns {bank_id: [tube, tube]}, each tube being a dictionary with
     "label", "tube_id", "end_A" and "end_B".
     "end_A" is the first pixel end (lowest local pixel id), "end_B" the last
-    pixel end (same A/B naming as in REFERENCE_BANKS_DATA / detector_banks_geo). From the nominal geometry (REFERENCE_BANKS_DATA and the Geant4 model):
+    pixel end (same A/B naming as in REFERENCE_BANKS_DATA). From the nominal
+    geometry (REFERENCE_BANKS_DATA and the Geant4 model):
       - horizontal banks: A end is on the left (+x),
       - vertical banks:   A end is at the bottom (-y).
     The ends are assigned based on the coordinates, not on the I/II labels, but
-    a warning is printed if the survey's I label is not the A end (in the
-    current data I is always the A end)."""
+    a note is printed (verbose) if the survey's I label is not the A end."""
+    expected = {label + end for label in label_map for end in ("I", "II")}
+    missing, unmapped = sorted(expected - set(points)), sorted(set(points) - expected)
+    if missing or unmapped:
+        raise ValueError(
+            f"survey points do not match the label map: missing {missing}, not in the map {unmapped}"
+        )
     banks = {}
-    for label, (bank_id, tube_id) in TUBE_LABEL_MAP.items():
+    for label, (bank_id, tube_id) in label_map.items():
         p_I, p_II = points[label + "I"], points[label + "II"]
         # coordinate along which the A and B ends are separated
         axis = 1 if bank_id in vertical_bank_ids else 0
         # A end: largest x for horizontal banks, smallest y for vertical banks
         I_is_A = (p_I[axis] > p_II[axis]) if axis == 0 else (p_I[axis] < p_II[axis])
         end_A, end_B = (p_I, p_II) if I_is_A else (p_II, p_I)
-        if not I_is_A:
+        if not I_is_A and verbose:
             print(f"Note: for {label} the II point is the A (low pixel id) end.")
         banks.setdefault(bank_id, []).append(
             {"label": label, "tube_id": tube_id, "end_A": end_A, "end_B": end_B}
@@ -238,7 +156,7 @@ def group_points_into_tubes(points, vertical_bank_ids):
 
 
 # ---------------------------------------------------------------------------
-# Step 4: sanity checks on the measured (still untrimmed) tubes
+# Step 3: sanity checks on the measured (still untrimmed) tubes
 # ---------------------------------------------------------------------------
 
 
@@ -246,17 +164,18 @@ def _unit(v):
     return v / np.linalg.norm(v)
 
 
-def check_tube_parallelism(banks):
+def check_tube_parallelism(banks, bank_notes=None):
     """The two measured tubes of a bank should be parallel (the packs are
-    mounted in a common frame). This also justifies the bank 5 extrapolation,
-    which assumes it. For bank 5 the test is trivially passed, because one of
-    the tubes was constructed parallel to the other one."""
+    mounted in a common frame). bank_notes ({bank_id: note}, from the survey
+    file entry) are printed with the banks, e.g. if a fix of the file made a
+    tube parallel by construction."""
+    bank_notes = bank_notes or {}
     print("\nParallelism of the two measured tubes in each bank:")
     for bank_id, (t1, t2) in sorted(banks.items()):
         u1 = _unit(t1["end_B"] - t1["end_A"])
         u2 = _unit(t2["end_B"] - t2["end_A"])
         angle = np.degrees(np.arccos(np.clip(np.dot(u1, u2), -1.0, 1.0)))
-        note = " (constructed parallel, see bank 5 fix)" if bank_id == 5 else ""
+        note = f" ({bank_notes[bank_id]})" if bank_id in bank_notes else ""
         flag = "  WARNING: not parallel!" if angle > PARALLEL_TOLERANCE_DEG else ""
         print(f"  bank {bank_id}: {angle:.3f} deg{note}{flag}")
 
@@ -311,7 +230,7 @@ def check_tube_ids_against_nominal(banks, vertical_bank_ids, tube_tube_distance)
 
 
 # ---------------------------------------------------------------------------
-# Step 5: remove the extra length of the end electronics
+# Step 4: remove the extra length of the end electronics
 # ---------------------------------------------------------------------------
 
 
@@ -384,47 +303,76 @@ def adjust_calibration_data_to_effective_tube_lengths(calibration_data, verbose=
 
 
 def get_measured_calibration_data(
-    filename=MEASUREMENT_FILE,
-    sample_to_window_distance=SAMPLE_TO_TANK_WINDOW_DISTANCE,
+    filename=DEFAULT_SURVEY_FILE,
+    sample_to_window_distance=None,
     verbose=True,
 ):
-    """Full chain: read -> fix bank 5 -> convert frame -> group into tubes ->
-    sanity checks -> trim the tube ends -> calibration data list."""
+    """Full chain: read -> fixes of the file -> convert frame -> group into
+    tubes -> sanity checks -> trim the tube ends -> calibration data list.
+    The file must be known to survey_files.py (ValueError otherwise).
+
+    sample_to_window_distance [mm] is passed to the frame function of the file's
+    entry (default: SAMPLE_TO_TANK_WINDOW_DISTANCE). An entry without a frame
+    function uses the coordinates as given (NeXus frame, origin at the sample);
+    giving a distance for such a file is a ValueError."""
+    survey_file = survey_file_info(filename)
     constants = _calibration_constants()
     tube_length_by_bank = constants["tube_length_by_bank"]
     vertical_bank_ids = constants["vertical_bank_ids"]
     tube_tube_distance = constants["tube_tube_distance"]
 
-    if sample_to_window_distance == 0.0:
-        print(
-            "WARNING: sample to tank window distance is 0 -> positions are "
-            "relative to the tank window, not to the sample!"
-        )
-    elif verbose:
-        print(
-            f"NOTE: using sample to tank window distance {sample_to_window_distance} mm "
-            f"(provisional, see SAMPLE_TO_TANK_WINDOW_DISTANCE)"
-        )
+    if survey_file.frame is None:
+        if sample_to_window_distance is not None:
+            raise ValueError(
+                f"{survey_file.file_name} has no frame conversion (its coordinates are used as "
+                "given, relative to the sample): a sample-to-window distance does not apply"
+            )
+        if verbose:
+            print(
+                "NOTE: no frame conversion for this file: its X, Y, Z are used as NeXus "
+                "coordinates relative to the sample position"
+            )
+    else:
+        if sample_to_window_distance is None:
+            sample_to_window_distance = SAMPLE_TO_TANK_WINDOW_DISTANCE
+        if sample_to_window_distance == 0.0:
+            print(
+                "WARNING: sample to tank window distance is 0 -> positions are "
+                "relative to the tank window, not to the sample!"
+            )
+        elif verbose:
+            print(
+                f"NOTE: using sample to tank window distance {sample_to_window_distance} mm "
+                f"(provisional, see SAMPLE_TO_TANK_WINDOW_DISTANCE)"
+            )
+    if survey_file.checksum is None and verbose:
+        print(f"NOTE: the entry of {survey_file.file_name} has no checksum: content not checked")
 
-    # 1) read the raw survey points (survey frame)
+    # 1) read the raw survey points (frame of the file)
     raw_points = read_measured_points(filename)
 
-    # 2) fix the mislabelled bank 5 tube as early as possible (the fix only
-    #    uses differences of points, so the frame does not matter here)
-    raw_points = fix_bank5_mislabelled_tube(raw_points, tube_tube_distance)
+    # 2) the corrections of this file, as early as possible (in its own frame)
+    for fix in survey_file.fixes:
+        raw_points = fix(raw_points, verbose)
 
     # 3) convert every point to the NeXus/Geant4 frame with sample origin
-    points = {
-        label: survey_to_nexus_frame(p, sample_to_window_distance)
-        for label, p in raw_points.items()
-    }
+    if survey_file.frame is None:
+        points = dict(raw_points)
+    else:
+        points = {
+            label: survey_file.frame(p, sample_to_window_distance)
+            for label, p in raw_points.items()
+        }
 
     # 4) group the end points into tubes, assign the A/B ends
-    banks = group_points_into_tubes(points, vertical_bank_ids)
+    banks = group_points_into_tubes(points, survey_file.label_map, vertical_bank_ids, verbose)
 
     # 5) sanity checks of the geometry and of the tube identification
     if verbose:
-        check_tube_parallelism(banks)
+        print(f"Survey file: {survey_file.file_name}")
+        if survey_file.description:
+            print(f"  {survey_file.description}")
+        check_tube_parallelism(banks, survey_file.bank_notes)
         check_tube_spacing(banks, tube_tube_distance)
         check_tube_ids_against_nominal(banks, vertical_bank_ids, tube_tube_distance)
         print("\nMeasured tube lengths and removed extra length:")
@@ -461,12 +409,33 @@ def get_measured_calibration_data(
     return calibration_data
 
 
-def main():
+def main(argv=None):
     """Command line entry point (loki-survey): print the checks and the calibration data."""
-    data = get_measured_calibration_data()
+    parser = argparse.ArgumentParser(
+        description="Convert a survey of the LOKI tube ends into calibration data "
+        "(prints the sanity checks and the data)."
+    )
+    parser.add_argument(
+        "--survey-file",
+        default=DEFAULT_SURVEY_FILE,
+        help="survey file, must have an entry in survey_files.py (default: the SAM-606 survey)",
+    )
+    parser.add_argument(
+        "--sample-to-window-distance",
+        type=float,
+        default=None,
+        help=f"[mm] sample to tank window distance, for files with a frame conversion "
+        f"(default: {SAMPLE_TO_TANK_WINDOW_DISTANCE}, provisional)",
+    )
+    args = parser.parse_args(argv)
+    try:
+        data = get_measured_calibration_data(args.survey_file, args.sample_to_window_distance)
+    except ValueError as error:
+        parser.error(str(error))
     print("\nCalibration data:")
     pprint.pprint(data, sort_dicts=False)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

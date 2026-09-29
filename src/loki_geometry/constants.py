@@ -5,7 +5,7 @@ numbers used by all modules of the package.
 Units: mm and degrees. Coordinates: x horizontal (positive to the left,
 looking along the beam), y up, z along the beam, origin at the sample.
 
-Sources: the LOKI Geant4 geometry (dgcode_projects/LOKI/G4GeoLoki,
+Sources: the LOKI Geant4 geometry (G4GeoLoki, https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki:
 BcsBanks.cc, BcsPack.cc, BcsTube.cc) and drawing SI-7615-463. The bank
 distances and angles there are rounded CAD values; the exact CAD corner
 positions are in reference_data.REFERENCE_BANKS_DATA.
