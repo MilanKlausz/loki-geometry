@@ -1,4 +1,4 @@
-"""Consistency of the shared geometry constants."""
+"""Tests of the shared geometry constants."""
 
 import numpy as np
 import pytest
@@ -54,3 +54,10 @@ def test_straw_lengths_match_the_reference_corners(bank_id):
     corners = REFERENCE_BANKS_DATA[bank_id]
     length = np.linalg.norm(np.subtract(corners["B"][0], corners["A"][0]))
     assert length == pytest.approx(c.STRAW_LENGTHS[bank_id], abs=0.01)
+
+
+def test_constants_nominal_rebuild_uses_the_tube_count_of_constants():
+    """nominal_corners derives the bank height from PACKS_PER_BANK; calibration
+    from TUBES_PER_LAYER. Both must agree."""
+    for bank_id in c.BANK_IDS:
+        assert c.PACKS_PER_BANK[bank_id] * 2 == c.TUBES_PER_LAYER[bank_id]

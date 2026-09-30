@@ -1,4 +1,4 @@
-"""Tests of the command-line entry points, the README claims and the packaging metadata.
+"""Tests of the command-line entry points, the README claims and the packaging.
 
 Fast smoke tests of every console script (small options only), the README
 Python snippet and example commands, the numbers stated in the README, the
@@ -12,22 +12,23 @@ import re
 import subprocess
 import sys
 
-import numpy as np
 import pytest
 
 import loki_geometry
-from loki_geometry import calibration, survey
 from loki_geometry import constants as c
 from loki_geometry import geant4 as g4
-from loki_geometry import nexus_json as lnj
-from loki_geometry import nominal_corners as nc
-from loki_geometry import verify_json as vnj
-from loki_geometry.geant4_example_data import example_calibration_data
-from loki_geometry.reference_data import REFERENCE_BANKS_DATA
+from loki_geometry import survey, survey_files
+from loki_geometry.survey_files import SAM606
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 README = os.path.join(REPO_DIR, "README.md")
+
+
 PYPROJECT = os.path.join(REPO_DIR, "pyproject.toml")
+
+
 SRC_DIR = os.path.join(REPO_DIR, "src")
 
 
@@ -84,9 +85,6 @@ def run_module(module, *args, cwd=None):
     )
 
 
-# --- packaging -----------------------------------------------------------------
-
-
 def test_console_scripts_point_to_callables():
     scripts = console_scripts()
     assert set(scripts) == {
@@ -103,11 +101,13 @@ def test_console_scripts_point_to_callables():
 
 
 def test_package_data_is_present_and_complete():
-    """The survey file (package data) has the 32 points of README: 2 tubes x 2 ends, banks 1-8."""
-    assert os.path.dirname(survey.DEFAULT_SURVEY_FILE).startswith(
-        os.path.dirname(loki_geometry.__file__)
-    )
-    points = survey.read_measured_points()
+    """Every registered survey file is installed with the package (package data), and
+    the SAM-606 file has the 32 points of the README: 2 tubes x 2 ends, banks 1-8."""
+    package_dir = os.path.dirname(loki_geometry.__file__)
+    for entry in survey_files.SURVEY_FILES.values():
+        assert os.path.isfile(os.path.join(package_dir, "data", entry.file_name))
+        assert entry.file_name.endswith(".txt")  # the package data pattern
+    points = survey.read_measured_points(SAM606.path)
     assert len(points) == 32
     assert re.search(r'loki_geometry\s*=\s*\["data/\*\.txt"\]', read(PYPROJECT))
 
@@ -127,14 +127,11 @@ def test_init_exports_what_the_readme_uses():
     assert re.fullmatch(r"\d+\.\d+\.\d+", loki_geometry.__version__)
 
 
-# --- README consistency ------------------------------------------------------------
-
-
 def test_readme_module_table_lists_every_module_and_script():
     text = read(README)
     modules = sorted(
         name[:-3]
-        for name in os.listdir(os.path.join(SRC_DIR, "loki_geometry"))
+        for name in os.listdir(os.path.dirname(loki_geometry.__file__))
         if name.endswith(".py") and name != "__init__.py"
     )
     for module in modules:
@@ -146,7 +143,8 @@ def test_readme_module_table_lists_every_module_and_script():
 
 def test_readme_numbers_match_the_constants():
     text = " ".join(read(README).split())  # README lines are wrapped
-    assert sum(c.TUBES_PER_BANK) * c.STRAWS_PER_TUBE * c.DEFAULT_PIXELS_PER_STRAW == 1_605_632
+    total = sum(c.TUBES_PER_BANK) * c.STRAWS_PER_TUBE * c.DEFAULT_PIXELS_PER_STRAW
+    assert f"{total:,}" in text  # 1,605,632
     assert f"{c.TUBE_GRID_SIDE:.2f}" in text  # 28.40
     assert f"{c.FRONT_TO_BACK_NORMAL:.2f}" in text  # 78.78
     assert f"{c.FRONT_TO_BACK_IN_PLANE:.2f}" in text  # 18.84
@@ -154,10 +152,9 @@ def test_readme_numbers_match_the_constants():
     assert f"({c.STRAW_RADIUS} mm)" in text
     assert f"{c.STRAW_STRAW_DISTANCE} mm to the side" in text
     offsets = [next(v for v in c.BANK_OFFSETS[b] if v) for b in (5, 6, 7, 8)]
-    assert offsets == [100.0, -15.0, -100.0, 50.0]  # "+100 / −15 / −100 / +50 mm for banks 5–8"
-    assert c.VERTICAL_BANK_IDS == (2, 4, 6, 8)
-    assert c.UPSIDE_DOWN_BANK_IDS == (1, 2, 5, 6)
-    assert survey.SAMPLE_TO_TANK_WINDOW_DISTANCE == 100.0
+    assert " / ".join(f"{v:+.0f}".replace("-", "−") for v in offsets) + " mm for banks 5–8" in text
+    assert "Vertical tubes: banks " + ", ".join(map(str, c.VERTICAL_BANK_IDS)) in text
+    assert "Packs mounted upside down: " + ", ".join(map(str, c.UPSIDE_DOWN_BANK_IDS)) in text
 
 
 def test_readme_half_pixel_shifts_cover_all_banks():
@@ -189,19 +186,16 @@ def test_readme_command_flags_exist(monkeypatch, capsys):
             code, help_texts[script] = run_entry_point(script, ["--help"], monkeypatch, capsys)
             assert code == 0
         for option in options:
-            assert option in help_texts[script], f"{script} {option}"
-
-
-# --- command line smoke tests --------------------------------------------------------
+            # the option as a whole word of the help text (not e.g. "-o" inside "--output")
+            pattern = r"(?<![\w-])" + re.escape(option) + r"(?![\w-])"
+            assert re.search(pattern, help_texts[script]), f"{script} {option}"
 
 
 @pytest.mark.parametrize(
     "args",
     [
-        ["--data", "reference", "--verbose"],
         ["--data", "example", "--verbose"],
         ["--data", "measured", "--verbose", "--compare-to-intended", "--print"],
-        ["--sample-to-window-distance", "119", "--verbose"],
     ],
 )
 def test_loki_calibrate_readme_examples(args, monkeypatch, capsys):
@@ -210,8 +204,6 @@ def test_loki_calibrate_readme_examples(args, monkeypatch, capsys):
     assert "=== Quality report ===" in out
     if "--print" in args:
         assert "'A': [" in out and "Corner positions compared to intended" in out
-    if "119" in args:
-        assert "sample to tank window distance 119.0 mm" in out
 
 
 def test_loki_calibrate_reference_self_test_reports_zero_differences(monkeypatch, capsys):
@@ -287,49 +279,6 @@ def test_loki_pixel_json_and_verify_json_readme_examples(tmp_path, monkeypatch, 
     assert code == 1 and "bank 8" in out and "> tolerance!" in out
 
 
-def test_verify_json_wrong_pixels_per_straw_is_an_error(tmp_path, capsys):
-    filename = str(tmp_path / "p.json")
-    lnj.main(["-o", filename, "--pixels-per-straw", "2", "--banks", "3"])
-    with pytest.raises(SystemExit):
-        vnj.main([filename, "--pixels-per-straw", "4"])
-    assert "pixel ids do not match" in capsys.readouterr().err
-
-
-def test_verify_json_requires_the_carriage_translation_for_bank_0(tmp_path):
-    output = lnj.build_output(
-        lnj.compute_instrument_pixels({0: REFERENCE_BANKS_DATA[0]}, 1), "test"
-    )
-    del output[lnj.CARRIAGE_ZERO_NAME]
-    filename = tmp_path / "p.json"
-    lnj.write_json(output, filename)
-    with pytest.raises(ValueError, match="detector_carriage_zero"):
-        vnj.read_pixel_positions(filename)
-
-
-def test_verify_json_reads_a_full_instrument_file_structure(tmp_path):
-    """README: 'works on the full instrument file too' (/entry/instrument/<groups>,
-    bank 0 translation inside detector_carriage/transformations), without loki.json."""
-    corners = {bank_id: g4.bank_corners(bank_id, 2) for bank_id in (0, 4)}
-    pixels = lnj.compute_instrument_pixels(corners, 2)
-    output = lnj.build_output(pixels, "test")
-    carriage = lnj.group(
-        "detector_carriage",
-        [lnj.group("transformations", [output.pop(lnj.CARRIAGE_ZERO_NAME)], "NXtransformations")],
-        "NXpositioner",
-    )
-    instrument = lnj.group(
-        "instrument",
-        [carriage, output["loki_detector_0"], output["loki_detector_4"]],
-        "NXinstrument",
-    )
-    full = {"children": [lnj.group("entry", [instrument], "NXentry")]}
-    filename = tmp_path / "full.json"
-    filename.write_text(json.dumps(full))
-    results = vnj.compare_with_geant4(vnj.read_pixel_positions(filename), 2)
-    assert sorted(results) == [0, 4]
-    assert max(deviation for deviation, _ in results.values()) < 1e-4
-
-
 def test_python_m_module_invocation():
     """README: the tools run as `python3 -m loki_geometry.<module>` with PYTHONPATH=src."""
     result = run_module("nominal_corners", "3")
@@ -339,36 +288,13 @@ def test_python_m_module_invocation():
     assert result.returncode == 0 and "--pixel-reference" in result.stdout
 
 
-# --- other public functions without coverage in the original tests -------------------
+def _readme_text():
+    with open(README, encoding="utf-8") as file:
+        return " ".join(file.read().split())
 
 
-def test_adjust_calibration_data_to_effective_tube_lengths(capsys):
-    adjusted = survey.adjust_calibration_data_to_effective_tube_lengths(example_calibration_data)
-    assert "stretched" in capsys.readouterr().out
-    for original, bank in zip(example_calibration_data, adjusted):
-        for before, after in zip(original["positions"], bank["positions"]):
-            assert after["distance"] == pytest.approx(c.STRAW_LENGTHS[bank["bank_id"]])
-            assert np.allclose(
-                np.add(after["first_pixel_end"], after["last_pixel_end"]),
-                np.add(before["first_pixel_end"], before["last_pixel_end"]),
-            )
-            # the input is not modified: still the pixel centres (half a pixel short)
-            assert before["distance"] == pytest.approx(
-                c.STRAW_LENGTHS[bank["bank_id"]] * (1 - 1 / c.DEFAULT_PIXELS_PER_STRAW), abs=1e-5
-            )
-
-
-def test_calibration_checks_pass_for_the_reference_data(capsys):
-    calibration.Detectors(
-        calibration.convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA), True
-    )
-    out = capsys.readouterr().out
-    assert "All bank base vectors are orthogonal." in out
-    assert "All bank tilt angles agree" in out
-    assert "All bank sample-bank distances agree" in out
-    assert "Warning" not in out
-
-
-def test_nominal_corners_print_formatted_data_prints_the_corners(capsys):
-    assert nc.Detectors().print_formatted_data() is None
-    assert "'A': [" in capsys.readouterr().out
+def test_readme_self_test_threshold_is_the_cli_threshold():
+    text = _readme_text()
+    # calibration.main: tolerance = 0.1 for the --data reference self test (and the
+    # actual largest difference, see test_calibration.py)
+    assert "0.066 mm, the rounding of the CAD values; exit code 1 above 0.1 mm" in text

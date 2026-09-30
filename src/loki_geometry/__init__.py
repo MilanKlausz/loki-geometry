@@ -2,7 +2,8 @@
 loki_geometry: geometry of the LOKI detector banks (ESS).
 
 - Calibration of the 8 bank corner positions from survey data
-  (loki_geometry.survey, loki_geometry.calibration).
+  (loki_geometry.survey, loki_geometry.calibration); the known survey files
+  and what is specific to each of them are in loki_geometry.survey_files.
 - Pixel geometry (detector numbers and pixel offsets) from the bank corners,
   and its export as NeXus-JSON nodes for the instrument file
   (loki_geometry.bank_pixels, loki_geometry.nexus_json), with a verification

@@ -8,8 +8,7 @@ Format, per bank id [mm]:
         back layer bottom tube] at the FIRST pixel end of the straws, on the tube
         axis ("top/bottom" = lowest/highest local tube id),
   'B': the same 4 tubes at the LAST pixel end,
-  'num_tubes': tubes in the bank; the other keys (name, topic, source, ...)
-  are kept for the instrument file and not used by this package.
+  'num_tubes': tubes in the bank.
 convert_reference_data_to_calibration_data turns it into calibration data.
 """
 
@@ -28,11 +27,6 @@ REFERENCE_BANKS_DATA = {
             (-500, -762.16, 5091.28),
         ],
         "num_tubes": 224,
-        "bank_offset": (0, 0, 0),
-        "name": "loki_detector_0",
-        "topic": "loki_detector",
-        "source": "loki_0",
-        "tube_length": 1.0,
     },
     1: {
         "A": [
@@ -48,11 +42,6 @@ REFERENCE_BANKS_DATA = {
             (-500, 275.35, 3021.67),
         ],
         "num_tubes": 64,
-        "bank_offset": (0, 0, 0),
-        "name": "loki_detector_1",
-        "topic": "loki_detector",
-        "source": "loki_1",
-        "tube_length": 1.0,
     },
     2: {
         "A": [
@@ -68,11 +57,6 @@ REFERENCE_BANKS_DATA = {
             (211.82, 250, 3433.19),
         ],
         "num_tubes": 48,
-        "bank_offset": (0, 0, 0),
-        "name": "loki_detector_2",
-        "topic": "loki_detector",
-        "source": "loki_2",
-        "tube_length": 0.5,
     },
     3: {
         "A": [
@@ -88,11 +72,6 @@ REFERENCE_BANKS_DATA = {
             (-500, -699.24, 2979.36),
         ],
         "num_tubes": 64,
-        "bank_offset": (0, 0, 0),
-        "name": "loki_detector_3",
-        "topic": "loki_detector",
-        "source": "loki_3",
-        "tube_length": 1.0,
     },
     4: {
         "A": [
@@ -108,11 +87,6 @@ REFERENCE_BANKS_DATA = {
             (-523.26, 250, 3408.67),
         ],
         "num_tubes": 48,
-        "bank_offset": (0, 0, 0),
-        "name": "loki_detector_4",
-        "topic": "loki_detector",
-        "source": "loki_4",
-        "tube_length": 0.5,
     },
     5: {
         "A": [
@@ -128,11 +102,6 @@ REFERENCE_BANKS_DATA = {
             (-500, 370.99, 1362.7),
         ],
         "num_tubes": 112,
-        "bank_offset": (0, 0, 0),
-        "name": "loki_detector_5",
-        "topic": "loki_detector",
-        "source": "loki_5",
-        "tube_length": 1.2,
     },
     6: {
         "A": [
@@ -148,11 +117,6 @@ REFERENCE_BANKS_DATA = {
             (321.66, 585, 1752.37),
         ],
         "num_tubes": 128,
-        "bank_offset": (0, 0, 0),
-        "name": "loki_detector_6",
-        "topic": "loki_detector",
-        "source": "loki_6",
-        "tube_length": 1.2,
     },
     7: {
         "A": [
@@ -168,11 +132,6 @@ REFERENCE_BANKS_DATA = {
             (-700, -885.65, 1200.58),
         ],
         "num_tubes": 80,
-        "bank_offset": (0, 0, 0),
-        "name": "loki_detector_7",
-        "topic": "loki_detector",
-        "source": "loki_7",
-        "tube_length": 1.2,
     },
     8: {
         "A": [
@@ -188,11 +147,6 @@ REFERENCE_BANKS_DATA = {
             (-1187.04, 650, 1590.41),
         ],
         "num_tubes": 128,
-        "bank_offset": (0, 0, 0),
-        "name": "loki_detector_8",
-        "topic": "loki_detector",
-        "source": "loki_8",
-        "tube_length": 1.2,
     },
 }
 

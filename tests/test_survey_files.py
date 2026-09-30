@@ -1,21 +1,25 @@
 """Tests of the survey file registry (survey_files.py) and of the entry of the
 SAM-606 survey: the file lookup and checksum, the coordinate frame, the tube
-label map, the bank 5 fix, and the use of an entry by survey.py (including a
-complete entry for a new, synthetic survey file)."""
+label map, the bank 5 fix, and the use of an entry by survey.py (including
+complete entries for new, synthetic survey files)."""
 
 import contextlib
 import copy
 import dataclasses
 import io
+import pathlib
 import random
+import re
+import shutil
 
 import numpy as np
 import pytest
 
+from loki_geometry import calibration, survey
 from loki_geometry import constants as c
-from loki_geometry import survey
 from loki_geometry import survey_files as sf
 from loki_geometry.reference_data import REFERENCE_BANKS_DATA
+from loki_geometry.survey_files import SAM606
 
 
 def _quiet(function, *args, **kwargs):
@@ -23,12 +27,12 @@ def _quiet(function, *args, **kwargs):
         return function(*args, **kwargs)
 
 
-def _sam606_banks(sample_to_window_distance=100.0):
+def _sam606_banks():
     """The SAM-606 points after the fixes, in the NeXus frame, grouped into tubes."""
     raw = survey.read_measured_points(sf.SAM606.path)
     for fix in sf.SAM606.fixes:
         raw = _quiet(fix, raw)
-    points = {label: sf.SAM606.frame(p, sample_to_window_distance) for label, p in raw.items()}
+    points = {label: sf.SAM606.frame(p) for label, p in raw.items()}
     return _quiet(survey.group_points_into_tubes, points, sf.SAM606.label_map, c.VERTICAL_BANK_IDS)
 
 
@@ -43,9 +47,6 @@ def register(monkeypatch):
     return add
 
 
-# --- registry ------------------------------------------------------------------------
-
-
 def test_every_entry_has_its_packaged_file_with_the_right_content():
     for name, entry in sf.SURVEY_FILES.items():
         assert entry.file_name == name
@@ -54,9 +55,12 @@ def test_every_entry_has_its_packaged_file_with_the_right_content():
         assert len(set(tubes)) == len(tubes)  # no two labels for the same tube
 
 
-def test_default_survey_file_is_sam606():
-    assert sf.DEFAULT_SURVEY_FILE == sf.SAM606.path
-    assert survey.DEFAULT_SURVEY_FILE == sf.SAM606.path
+def test_default_survey_file_is_a_registered_packaged_file():
+    """The default can be switched to a new survey (README); it must be a packaged
+    file with an entry."""
+    entry = sf.survey_file_info(sf.DEFAULT_SURVEY_FILE)
+    assert sf.DEFAULT_SURVEY_FILE == entry.path
+    assert survey.DEFAULT_SURVEY_FILE == sf.DEFAULT_SURVEY_FILE
 
 
 def test_unknown_survey_file_is_rejected(tmp_path):
@@ -85,6 +89,16 @@ def test_checksum_ignores_line_endings_blank_lines_and_spaces(tmp_path):
     assert sf.survey_file_info(path) is sf.SAM606
 
 
+def test_lookup_is_by_basename_and_accepts_pathlib(tmp_path):
+    """A copy of a known file in any directory, given as str or Path, finds the entry."""
+    copy_path = tmp_path / "elsewhere" / sf.SAM606_FILE_NAME
+    copy_path.parent.mkdir()
+    shutil.copy(sf.SAM606.path, copy_path)
+    assert sf.survey_file_info(copy_path) is sf.SAM606
+    assert sf.survey_file_info(str(copy_path)) is sf.SAM606
+    assert sf.survey_file_info(pathlib.Path(sf.SAM606.path)) is sf.SAM606
+
+
 def test_survey_cli_rejects_an_unknown_file(tmp_path, capsys):
     path = tmp_path / "new_survey.txt"
     path.write_text("C1UP3I, 1, 2, 3\n")
@@ -95,7 +109,6 @@ def test_survey_cli_rejects_an_unknown_file(tmp_path, capsys):
 
 
 def test_calibrate_cli_takes_the_survey_file(tmp_path, capsys):
-    from loki_geometry import calibration
 
     assert calibration.main(["--survey-file", sf.SAM606.path]) == 0
     with pytest.raises(SystemExit):
@@ -103,15 +116,12 @@ def test_calibrate_cli_takes_the_survey_file(tmp_path, capsys):
     assert "only applies to --data measured" in capsys.readouterr().err
 
 
-# --- SAM-606: frame, label map, fixes ------------------------------------------------
-
-
 def test_tank_window_frame_is_a_proper_rotation_plus_shift():
-    distance = 123.0
-    origin = sf.tank_window_frame(np.zeros(3), distance)
-    assert np.allclose(origin, (0, 0, distance))
+    origin = sf.tank_window_frame(np.zeros(3))
+    assert np.allclose(origin, (0, 0, sf.SAMPLE_TO_TANK_WINDOW_DISTANCE))
+    assert sf.SAMPLE_TO_TANK_WINDOW_DISTANCE == 100.0  # provisional
     matrix = np.array(
-        [sf.tank_window_frame(e, distance) - origin for e in np.eye(3)]
+        [sf.tank_window_frame(e) - origin for e in np.eye(3)]
     ).T  # columns: images of the survey X, Y, Z axes
     assert np.allclose(matrix, [[0, 1, 0], [0, 0, 1], [1, 0, 0]])
     assert np.linalg.det(matrix) == pytest.approx(1.0)  # handedness preserved
@@ -190,11 +200,8 @@ def test_sam606_bank_note_is_printed_with_the_checks(capsys):
     assert sf.SAM606.description in out
 
 
-# --- the entry as used by survey.py ------------------------------------------------------
-
-
 def test_points_must_match_the_label_map():
-    raw = _quiet(sf.sam606_fix_bank5_mislabelled_tube, survey.read_measured_points())
+    raw = _quiet(sf.sam606_fix_bank5_mislabelled_tube, survey.read_measured_points(SAM606.path))
     missing = dict(raw)
     del missing["C2UP3II"]
     with pytest.raises(ValueError, match=r"missing \['C2UP3II'\]"):
@@ -204,9 +211,10 @@ def test_points_must_match_the_label_map():
         survey.group_points_into_tubes(extra, sf.SAM606.label_map, c.VERTICAL_BANK_IDS)
 
 
-def test_without_the_bank5_fix_the_sam606_file_is_inconsistent(register, tmp_path):
-    """The fix is what makes the file usable: without it, the two C1UP8 points
-    are on different tubes, and bank 5's tubes are no longer parallel."""
+def test_without_the_bank5_fix_bank5_tubes_are_not_parallel(register, tmp_path):
+    """What the docstring of test_without_the_bank5_fix_the_sam606_file_is_inconsistent
+    claims but does not assert: without the fix the parallelism check warns for bank 5
+    (1.3 deg), and only for bank 5."""
     path = tmp_path / "unfixed.txt"
     path.write_text(open(sf.SAM606.path).read())
     register(
@@ -214,10 +222,12 @@ def test_without_the_bank5_fix_the_sam606_file_is_inconsistent(register, tmp_pat
             sf.SAM606, file_name="unfixed.txt", checksum=sf.content_checksum(path), fixes=()
         )
     )
-    unfixed = _quiet(survey.get_measured_calibration_data, str(path), verbose=False)
-    fixed = _quiet(survey.get_measured_calibration_data, verbose=False)
-    assert unfixed[4] != fixed[4]  # bank 5
-    assert unfixed[:4] == fixed[:4] and unfixed[5:] == fixed[5:]
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        survey.get_measured_calibration_data(str(path), verbose=True)
+    parallel = out.getvalue().split("Parallelism")[1].split("Perpendicular")[0]
+    flagged = re.findall(r"bank (\d): [\d.]+ deg.*WARNING: not parallel", parallel)
+    assert flagged == ["5"]
 
 
 def test_I_II_labels_and_line_order_do_not_matter(register, tmp_path):
@@ -237,7 +247,7 @@ def test_I_II_labels_and_line_order_do_not_matter(register, tmp_path):
     register(
         dataclasses.replace(sf.SAM606, file_name="swapped.txt", checksum=sf.content_checksum(path))
     )
-    original = _quiet(survey.get_measured_calibration_data, verbose=False)
+    original = _quiet(survey.get_measured_calibration_data, SAM606.path, verbose=False)
     result = _quiet(survey.get_measured_calibration_data, str(path), verbose=False)
     assert result == original
 
@@ -245,21 +255,22 @@ def test_I_II_labels_and_line_order_do_not_matter(register, tmp_path):
 def test_a_new_survey_file_with_its_own_entry(register, tmp_path):
     """The steps of the README section "A new survey", with a synthetic file: the
     SAM-606 points (bank 5 already fixed) in another frame (the NeXus axes in
-    metres, origin 1 m downstream of the tank window) and with other labels. With
+    metres, origin 1100 mm downstream of the sample) and with other labels. With
     its own label map and frame it gives exactly the SAM-606 calibration data."""
-    raw = _quiet(sf.sam606_fix_bank5_mislabelled_tube, survey.read_measured_points())
+    origin_from_sample = np.array([0.0, 0.0, 1100.0])  # [mm] origin of the new frame
+    raw = _quiet(sf.sam606_fix_bank5_mislabelled_tube, survey.read_measured_points(SAM606.path))
     new_labels = {old: f"T{n}" for n, old in enumerate(sorted(sf.SAM606.label_map))}
     lines = []
     for old, new in new_labels.items():
         for end in ("I", "II"):
-            x, y, z = sf.tank_window_frame(raw[old + end], -1000.0) / 1000.0  # [m]
+            x, y, z = (sf.tank_window_frame(raw[old + end]) - origin_from_sample) / 1000.0  # [m]
             lines.append(f"{new}{end}, {x:.7f}, {y:.7f}, {z:.7f}")
     path = tmp_path / "LOKI_TUBES_2030.txt"
     path.write_text("\n".join(lines) + "\n")
 
-    def metre_frame(point, sample_to_window_distance):
-        # origin 1000 mm downstream of the window, i.e. window distance + 1000 from the sample
-        return np.asarray(point) * 1000.0 + (0.0, 0.0, sample_to_window_distance + 1000.0)
+    def metre_frame(point):
+        # everything the conversion needs is in the function: units and origin
+        return np.asarray(point) * 1000.0 + origin_from_sample
 
     register(
         sf.SurveyFile(
@@ -270,24 +281,24 @@ def test_a_new_survey_file_with_its_own_entry(register, tmp_path):
             label_map={new_labels[old]: ids for old, ids in sf.SAM606.label_map.items()},
         )
     )
-    for distance in (100.0, 119.0):
-        new = _quiet(survey.get_measured_calibration_data, str(path), distance, verbose=False)
-        expected = _quiet(survey.get_measured_calibration_data, sample_to_window_distance=distance)
-        for bank_new, bank_expected in zip(new, expected):
-            assert bank_new["bank_id"] == bank_expected["bank_id"]
-            for tube_new, tube_expected in zip(bank_new["positions"], bank_expected["positions"]):
-                assert tube_new["tube_id"] == tube_expected["tube_id"]
-                for end in ("first_pixel_end", "last_pixel_end"):
-                    assert np.allclose(tube_new[end], tube_expected[end], atol=1e-3)
+    new = _quiet(survey.get_measured_calibration_data, str(path), verbose=False)
+    expected = _quiet(survey.get_measured_calibration_data, SAM606.path, verbose=False)
+    assert [bank["bank_id"] for bank in new] == [bank["bank_id"] for bank in expected]
+    for bank_new, bank_expected in zip(new, expected):
+        assert bank_new["bank_id"] == bank_expected["bank_id"]
+        for tube_new, tube_expected in zip(bank_new["positions"], bank_expected["positions"]):
+            assert tube_new["tube_id"] == tube_expected["tube_id"]
+            for end in ("first_pixel_end", "last_pixel_end"):
+                assert np.allclose(tube_new[end], tube_expected[end], atol=1e-3)
 
 
-def _write_sam606_in_nexus_frame(path, sample_to_window_distance=100.0):
+def _write_sam606_in_nexus_frame(path):
     """The SAM-606 points (bank 5 already fixed), converted to NeXus coordinates
     relative to the sample, with the SAM-606 labels."""
-    raw = _quiet(sf.sam606_fix_bank5_mislabelled_tube, survey.read_measured_points())
+    raw = _quiet(sf.sam606_fix_bank5_mislabelled_tube, survey.read_measured_points(SAM606.path))
     lines = []
     for label, point in raw.items():
-        x, y, z = sf.tank_window_frame(point, sample_to_window_distance)
+        x, y, z = sf.tank_window_frame(point)
         lines.append(f"{label}, {x:.3f}, {y:.3f}, {z:.3f}")
     path.write_text("\n".join(lines) + "\n")
 
@@ -306,7 +317,8 @@ def test_a_minimal_entry_uses_the_coordinates_as_given(register, tmp_path):
         {},
     )
     result = _quiet(survey.get_measured_calibration_data, str(path), verbose=False)
-    expected = _quiet(survey.get_measured_calibration_data, sample_to_window_distance=100.0)
+    expected = _quiet(survey.get_measured_calibration_data, SAM606.path, verbose=False)
+    assert [bank["bank_id"] for bank in result] == [bank["bank_id"] for bank in expected]
     for bank_result, bank_expected in zip(result, expected):
         for tube_result, tube_expected in zip(bank_result["positions"], bank_expected["positions"]):
             for end in ("first_pixel_end", "last_pixel_end"):
@@ -318,22 +330,12 @@ def test_a_minimal_entry_uses_the_coordinates_as_given(register, tmp_path):
     assert "has no checksum: content not checked" in out.getvalue()
 
 
-def test_without_a_frame_a_sample_to_window_distance_is_an_error(register, tmp_path, capsys):
-    path = tmp_path / "minimal.txt"
-    _write_sam606_in_nexus_frame(path)
-    register(sf.SurveyFile("minimal.txt", sf.SAM606.label_map))
-    with pytest.raises(ValueError, match="does not apply"):
-        survey.get_measured_calibration_data(str(path), 100.0, verbose=False)
-    with pytest.raises(SystemExit) as error:
-        survey.main(["--survey-file", str(path), "--sample-to-window-distance", "100"])
-    assert error.value.code == 2
-    assert "does not apply" in capsys.readouterr().err
-
-
 def test_without_a_checksum_a_changed_file_is_used(register, tmp_path):
     path = tmp_path / "minimal.txt"
     _write_sam606_in_nexus_frame(path)
     register(sf.SurveyFile("minimal.txt", sf.SAM606.label_map))
     before = sf.survey_file_info(path)
-    _write_sam606_in_nexus_frame(path, sample_to_window_distance=119.0)  # changed content
+    checksum_before = sf.content_checksum(path)
+    path.write_text(path.read_text() + "C9XP1I, 0, 0, 0\n")  # changed content
+    assert sf.content_checksum(path) != checksum_before
     assert sf.survey_file_info(path) is before

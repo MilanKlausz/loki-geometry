@@ -17,11 +17,13 @@ An entry (SurveyFile), only file_name and label_map are required:
                 (horizontal banks: 0 = topmost tube, vertical banks: 0 =
                 leftmost tube looking along the beam)
   frame         optional: the file's coordinate frame, as a function
-                (point [mm], sample_to_window_distance [mm]) -> NeXus point [mm]
-                (x left, y up, z along the beam, origin at the sample).
+                point [mm] -> NeXus point [mm] (x left, y up, z along the beam,
+                origin at the sample); everything the conversion needs (e.g. the
+                position of the survey origin relative to the sample) is part of
+                the function.
                 None (default): the X, Y, Z values of the file are used as they
                 are, i.e. they must already be NeXus coordinates WITH RESPECT TO
-                THE SAMPLE POSITION (and no sample-to-window distance applies).
+                THE SAMPLE POSITION.
   checksum      optional: SHA-256 of the file content (see content_checksum).
                 None (default): the content is not checked, so a changed file
                 would be used with this entry unnoticed.
@@ -64,8 +66,9 @@ class SurveyFile:
 
 def content_checksum(filename):
     """SHA-256 of the non-empty lines of a file, stripped and joined with '\\n'
-    (so that line endings and trailing spaces do not matter)."""
-    with open(filename) as file:
+    (so that line endings, trailing spaces and a UTF-8 byte order mark do not
+    matter)."""
+    with open(filename, encoding="utf-8-sig") as file:
         lines = [line.strip() for line in file if line.strip()]
     return hashlib.sha256("\n".join(lines).encode()).hexdigest()
 
@@ -75,7 +78,19 @@ def content_checksum(filename):
 # ---------------------------------------------------------------------------
 
 
-def tank_window_frame(point, sample_to_window_distance):
+# Distance [mm] along the beam from the nominal sample position to the origin
+# of the survey's TANK WINDOW coordinate system (the window is downstream of the
+# sample, so z_sample = X_window + this value).
+# TODO: PROVISIONAL value, to be confirmed. Drawing SI-7615-463 (sheet 2,
+# detail E) gives 119.00 mm from the nominal sample point to the vessel window
+# flange face and 108.0 mm to the sapphire window; which surface is the survey
+# origin is not known yet.
+# It shifts every bank equally along z: it does not change the fit quality
+# numbers or the tilts, only the distances compared with the intended geometry.
+SAMPLE_TO_TANK_WINDOW_DISTANCE = 100.0  # [mm]
+
+
+def tank_window_frame(point):
     """TANK WINDOW coordinate system of the survey (X along the beam, Y left,
     Z up; origin at the tank window) -> NeXus frame (x left, y up, z along the
     beam; origin at the sample).
@@ -83,9 +98,9 @@ def tank_window_frame(point, sample_to_window_distance):
     Both frames are right-handed and the axes are just cyclically permuted:
       x_nexus = Y_survey, y_nexus = Z_survey, z_nexus = X_survey
     Then the origin is moved from the window to the sample position, which lies
-    upstream of the window by sample_to_window_distance."""
+    upstream of the window by SAMPLE_TO_TANK_WINDOW_DISTANCE (provisional)."""
     X, Y, Z = point
-    return np.array([Y, Z, X + sample_to_window_distance])
+    return np.array([Y, Z, X + SAMPLE_TO_TANK_WINDOW_DISTANCE])
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +178,8 @@ SAM606 = SurveyFile(
     checksum="7195877da8cbc18f846a9ef1b381696b7c51bc6f2a334c75ef203f1d051c2202",
     description="SAM-606 survey (2025): both ends of 2 front layer tubes of banks 1-8 "
     "(32 points), on the tube axis at the physical tube ends (including the end electronics), "
-    "in the TANK WINDOW coordinate system. Bank 0 was not surveyed.",
+    "in the TANK WINDOW coordinate system (sample to window distance "
+    f"{SAMPLE_TO_TANK_WINDOW_DISTANCE} mm, provisional). Bank 0 was not surveyed.",
     frame=tank_window_frame,
     label_map=SAM606_LABEL_MAP,
     fixes=(sam606_fix_bank5_mislabelled_tube,),

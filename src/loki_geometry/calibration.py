@@ -6,8 +6,7 @@ from the positions of two tubes of the bank.
 Usage
 -----
   loki-calibrate [--data measured|reference|example] [--survey-file FILE]
-                 [--sample-to-window-distance D] [--verbose]
-                 [--compare-to-intended] [--print]
+                 [--verbose] [--compare-to-intended] [--print]
   --data measured   a survey file, via survey.py (default; the SAM-606 survey
                     unless --survey-file is given)
   --data reference  the intended geometry (REFERENCE_BANKS_DATA) -> must
@@ -28,8 +27,10 @@ Two tubes of the FRONT layer (the layer facing the sample), each given by
   "tube_id":         zero-indexed local tube id; horizontal banks (0,1,3,5,7):
                      0 = topmost tube, vertical banks (2,4,6,8): 0 = leftmost
                      tube (looking along the beam)
-  "first_pixel_end": point on the tube axis at the end of the first pixel
-  "last_pixel_end":  point on the tube axis at the end of the last pixel
+  "first_pixel_end": point on the tube axis at the straw end on the side of
+                     the first pixel
+  "last_pixel_end":  point on the tube axis at the straw end on the side of
+                     the last pixel
 The local pixel ids of a straw increase from +x to -x (horizontal banks) and
 from -y to +y (vertical banks) in the NeXus coordinate system (x left, y up,
 z along the beam, origin at the sample), [mm].
@@ -39,16 +40,19 @@ measured physical tube ends include ~15 mm of end electronics at both ends, the
 Geant4 end pixel centres are half a pixel inside): the algorithm only uses the
 midpoint and the direction of each tube, which such errors do not change. The
 nominal (effective) straw length of the bank is used for the tube length.
-The input is checked (ValueError): the two tube ids must differ, the two tubes
-must point the same way, and the layer normal must point away from the sample
-(swapped first / last pixel ends would put the back layers in front).
+The input is checked (ValueError): exactly 2 tubes per bank and each bank
+once, the two tube ids must differ, the two tubes must point the same way, and
+the layer normal must point away from the sample (swapped first / last pixel
+ends, or survey data in a mirrored frame, would put the back layers in front).
 
 Output
 ------
 positionA / positionB of each bank: the first / last pixel ends of the 4
 corner tubes, in the order [front layer top tube, back layer top tube, front
 layer bottom tube, back layer bottom tube] ("top/bottom" = lowest/highest tube
-id), as pixel CENTRE positions (moved half a pixel inwards from the straw ends).
+id). With use_pixel_centre_position=True (as used by loki-calibrate) they are
+pixel CENTRE positions (moved half a pixel inwards from the straw ends),
+otherwise the straw ends. formatted_data() gives the straw ends in both cases.
 
 Algorithm (Bank._calculate_corner_positions)
 --------------------------------------------
@@ -111,9 +115,7 @@ class Detectors:
     upside_down_bank_ids = c.UPSIDE_DOWN_BANK_IDS
     straw_pixel_number = c.DEFAULT_PIXELS_PER_STRAW
 
-    REFERENCE_BANKS_DATA = (
-        REFERENCE_BANKS_DATA  # the intended corners (also serving as template for the output)
-    )
+    REFERENCE_BANKS_DATA = REFERENCE_BANKS_DATA  # the intended corners
 
     def __init__(
         self,
@@ -137,6 +139,8 @@ class Detectors:
         self.banks = {}
         for calibration_bank_data in calibration_data:
             bank_id = calibration_bank_data["bank_id"]
+            if bank_id in self.banks:
+                raise ValueError(f"bank {bank_id} appears twice in the calibration data")
             self.banks[bank_id] = Bank(
                 calibration_bank_data,
                 is_upside_down_bank=bank_id in self.upside_down_bank_ids,
@@ -187,12 +191,12 @@ class Detectors:
             if as_straw_ends and bank.positions_are_pixel_centres:
                 half_pixel = bank.vector_along_tubes * bank.pixel_size / 2
                 positionA, positionB = positionA + half_pixel, positionB - half_pixel
-            # Use existing data as template, make a copy to avoid modifying the original
-            bank_output = self.REFERENCE_BANKS_DATA.get(bank_id, {}).copy()
-            # Round coordinates and convert to tuples of plain floats to match reference formatting
-            bank_output["A"] = [tuple(round(float(v), decimals) for v in pos) for pos in positionA]
-            bank_output["B"] = [tuple(round(float(v), decimals) for v in pos) for pos in positionB]
-            bank_data[bank_id] = bank_output
+            # rounded, as tuples of plain floats (the REFERENCE_BANKS_DATA format)
+            bank_data[bank_id] = {
+                "A": [tuple(round(float(v), decimals) for v in pos) for pos in positionA],
+                "B": [tuple(round(float(v), decimals) for v in pos) for pos in positionB],
+                "num_tubes": c.TUBES_PER_BANK[bank_id],
+            }
         return bank_data
 
     def print_formatted_data(self, as_straw_ends=True):
@@ -533,6 +537,11 @@ class Bank:
         """
         # --- Step 1: the input tubes, ordered by local tube id --------------
         # tube_a = the tube with the lower id (closer to tube 0), tube_b = the other
+        if len(calibration_bank_data["positions"]) != 2:
+            raise ValueError(
+                f"bank {self.bank_id}: exactly 2 input tubes are needed, "
+                f"got {len(calibration_bank_data['positions'])}"
+            )
         tube_a, tube_b = sorted(calibration_bank_data["positions"], key=lambda pos: pos["tube_id"])
         if tube_a["tube_id"] == tube_b["tube_id"]:
             raise ValueError(
@@ -597,8 +606,9 @@ class Bank:
         # points towards it if the first / last pixel ends are swapped (u flipped)
         if np.dot(n, centroid) <= 0:
             raise ValueError(
-                f"bank {self.bank_id}: the layer normal points towards the sample; "
-                "first / last pixel ends swapped in the input?"
+                f"bank {self.bank_id}: the layer normal points towards the sample: first / last "
+                "pixel ends swapped in the input, or a mirrored frame (determinant -1) in the "
+                "frame conversion of the survey file?"
             )
 
         self.vector_along_tubes = u
@@ -752,15 +762,8 @@ def main(argv=None):
     parser.add_argument(
         "--survey-file",
         default=None,
-        help="survey file for --data measured, must have an entry in survey_files.py "
-        "(default: the SAM-606 survey)",
-    )
-    parser.add_argument(
-        "--sample-to-window-distance",
-        type=float,
-        default=None,
-        help="[mm] sample to tank window distance for the measured data "
-        "(default: the value in survey.py)",
+        help="survey file for --data measured (a path, or the name of a packaged file); it must "
+        "have an entry in survey_files.py (default: the default survey of survey_files.py)",
     )
     parser.add_argument("--verbose", action="store_true", help="print the quality report")
     parser.add_argument(
@@ -775,9 +778,8 @@ def main(argv=None):
         help="print the corner data (straw ends) in the REFERENCE_BANKS_DATA format",
     )
     args = parser.parse_args(argv)
-    for option in ("survey_file", "sample_to_window_distance"):
-        if getattr(args, option) is not None and args.data != "measured":
-            parser.error(f"--{option.replace('_', '-')} only applies to --data measured")
+    if args.survey_file is not None and args.data != "measured":
+        parser.error("--survey-file only applies to --data measured")
 
     if args.data == "reference":
         print("Using the intended geometry (REFERENCE_BANKS_DATA) as calibration data")
@@ -793,13 +795,18 @@ def main(argv=None):
         print(f"Using the survey {survey_file} as calibration data")
 
         try:
-            calibration_data = get_measured_calibration_data(
-                survey_file, args.sample_to_window_distance, verbose=args.verbose
-            )
+            calibration_data = get_measured_calibration_data(survey_file, verbose=args.verbose)
+        except OSError as error:
+            parser.error(f"cannot read {survey_file}: {error.strerror or error}")
         except ValueError as error:
             parser.error(str(error))
 
-    detectors = Detectors(calibration_data, use_pixel_centre_position=True, verbose=args.verbose)
+    try:
+        detectors = Detectors(
+            calibration_data, use_pixel_centre_position=True, verbose=args.verbose
+        )
+    except ValueError as error:
+        parser.error(str(error))
 
     if args.compare_to_intended:
         detectors.compare_to(detectors.intended, label="intended (REFERENCE_BANKS_DATA)")

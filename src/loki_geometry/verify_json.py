@@ -13,6 +13,17 @@ transformation the group depends on (for bank 0 the detector_carriage_zero
 translation, with the carriage motion taken as zero).
 --ignore-pixel-shape uses bank translation + pixel offset only.
 
+Assumptions:
+  - bank 0 (rear bank) depends on the detector carriage, and it is compared
+    with the Geant4 geometry at the default rear bank distance of 5 m, i.e.
+    detector_carriage_zero must correspond to 5 m (as in loki.json);
+  - all lengths are in m (the units attributes are not read), the translations
+    have no further transformations (their depends_on is "."), and vertices 0
+    and 2 of the pixel shape are the centres of the two cylinder faces.
+Differences from verifyJSON: the default tolerance is 1.0 mm (verifyJSON:
+0.1 mm), and the pixel shape centre is used unless --ignore-pixel-shape is
+given (verifyJSON uses translation + offset only).
+
 Usage:
   loki-verify-json FILE [--tolerance 1.0] [--pixels-per-straw N] [--ignore-pixel-shape]
 """
@@ -48,6 +59,20 @@ def _attribute(node, name):
     return None
 
 
+def _required_child(group_node, name, context):
+    """The child `name` of a group; ValueError if the group or the child is missing."""
+    child = _child(group_node, name) if group_node is not None else None
+    if child is None:
+        raise ValueError(f"{context}: no '{name}'")
+    return child
+
+
+def _values(dataset_node, context):
+    if "values" not in _config(dataset_node):
+        raise ValueError(f"{context}: no values")
+    return _config(dataset_node)["values"]
+
+
 def translation_mm(translation_node):
     """Position [mm] given by a translation dataset (magnitude [m] * unit vector)."""
     return (
@@ -57,31 +82,46 @@ def translation_mm(translation_node):
     )
 
 
+def _group_name(group_node):
+    return group_node.get("name", "bank group")
+
+
 def _bank_translation_node(group_node, carriage_zero):
-    depends_on = _config(_child(group_node, "depends_on"))["values"]
+    name = _group_name(group_node)
+    depends_on = _values(_required_child(group_node, "depends_on", name), f"{name}/depends_on")
     if depends_on.endswith("/detector_carriage/value"):
+        if carriage_zero is None:
+            raise ValueError(
+                f"{name} depends on the detector carriage, but no {CARRIAGE_ZERO_NAME} "
+                "translation was found"
+            )
         return carriage_zero
-    return _child(_child(group_node, "transformations"), depends_on.rsplit("/", 1)[1])
+    transformations = _required_child(group_node, "transformations", name)
+    return _required_child(transformations, depends_on.rsplit("/", 1)[1], f"{name}/transformations")
 
 
 def pixel_shape_centre_mm(group_node):
     """Centre of the pixel cylinder relative to the pixel offset point [mm]:
     the midpoint of the centres of its two faces (vertices 0 and 2)."""
+    name = _group_name(group_node)
+    shape = _required_child(group_node, "pixel_shape", name)
     vertices = np.asarray(
-        _config(_child(_child(group_node, "pixel_shape"), "vertices"))["values"], dtype=float
+        _values(_required_child(shape, "vertices", f"{name}/pixel_shape"), f"{name}/vertices"),
+        dtype=float,
     )
     return (vertices[0] + vertices[2]) / 2 * M_TO_MM
 
 
 def bank_pixels_from_group(group_node, carriage_zero=None, use_pixel_shape=True):
-    """(pixel ids, absolute pixel centre positions [mm]) of a loki_detector_<id> group."""
-    ids = np.asarray(_config(_child(group_node, "detector_number"))["values"])
-    offsets = (
-        np.column_stack(
-            [_config(_child(group_node, f"{axis}_pixel_offset"))["values"] for axis in "xyz"]
-        )
-        * M_TO_MM
-    )
+    """(pixel ids, absolute pixel centre positions [mm]) of a loki_detector_<id> group.
+    Raises ValueError if a part of the geometry is missing."""
+    name = _group_name(group_node)
+
+    def dataset_values(dataset):
+        return _values(_required_child(group_node, dataset, name), f"{name}/{dataset}")
+
+    ids = np.asarray(dataset_values("detector_number"))
+    offsets = np.column_stack([dataset_values(f"{axis}_pixel_offset") for axis in "xyz"]) * M_TO_MM
     positions = translation_mm(_bank_translation_node(group_node, carriage_zero)) + offsets
     if use_pixel_shape:
         positions = positions + pixel_shape_centre_mm(group_node)
@@ -113,7 +153,9 @@ def read_pixel_positions(filename, use_pixel_shape=True):
         if name == CARRIAGE_ZERO_NAME:
             carriage_zero = node
         elif name == "detector_carriage":
-            carriage_zero = _child(_child(node, "transformations"), CARRIAGE_ZERO_NAME)
+            transformations = _child(node, "transformations")
+            if transformations is not None:
+                carriage_zero = _child(transformations, CARRIAGE_ZERO_NAME)
         else:
             pending[int(name.rsplit("_", 1)[1])] = node
     if not pending:
@@ -139,14 +181,21 @@ def compare_with_geant4(banks, pixels_per_straw):
     return results
 
 
+def _positive_int(text):
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, not {text}")
+    return value
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Compare LOKI pixel positions in a NeXus-JSON file with Geant4."
     )
-    parser.add_argument("filename")
+    parser.add_argument("filename", help="NeXus-JSON file (loki-pixel-json output or loki.json)")
     parser.add_argument(
         "--pixels-per-straw",
-        type=int,
+        type=_positive_int,
         default=None,
         help="default: deduced from the number of pixels in the banks",
     )
@@ -167,8 +216,10 @@ def main(argv=None):
             bank_id, (ids, _) = next(iter(banks.items()))
             pixels_per_straw = len(ids) // (TUBES_PER_BANK[bank_id] * STRAWS_PER_TUBE)
         results = compare_with_geant4(banks, pixels_per_straw)
+    except OSError as error:
+        parser.error(f"cannot read {args.filename}: {error.strerror or error}")
     except ValueError as error:
-        parser.error(str(error))
+        parser.error(f"{args.filename}: {error}")
     print(f"{args.filename}: {pixels_per_straw} pixels per straw, deviation from Geant4 [mm]:")
     for bank_id, (deviation, pixel) in results.items():
         flag = "" if deviation <= args.tolerance else "  > tolerance!"

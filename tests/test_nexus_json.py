@@ -1,19 +1,178 @@
-"""Tests of the NeXus-JSON export and of its verification against Geant4."""
+"""Tests of the NeXus-JSON export (nexus_json.py), including the comparison with
+the current LOKI instrument file loki.json (512 pixels per straw), whose
+values are hard-coded below."""
 
+import contextlib
+import io
 import json
 
 import numpy as np
 import pytest
 
 from loki_geometry import bank_pixels as lbp
-from loki_geometry import geant4 as g4
+from loki_geometry import calibration, survey
+from loki_geometry import constants as c
 from loki_geometry import nexus_json as lnj
 from loki_geometry import verify_json as vnj
 from loki_geometry.reference_data import REFERENCE_BANKS_DATA
+from loki_geometry.survey_files import SAM606
+
+ALL_BANKS = range(c.NUMBER_OF_BANKS)
+
+
+# detector_number of the first pixel of each bank
+LOKI_JSON_FIRST_IDS_512 = (1, 802817, 1032193, 1204225, 1433601, 1605633, 2007041, 2465793, 2752513)
+
+
+LOKI_JSON_PIXELS_PER_BANK_512 = (
+    802816,
+    229376,
+    172032,
+    229376,
+    172032,
+    401408,
+    458752,
+    286720,
+    458752,
+)
+
+
+# bank translations (trans_<id+1>, detector_carriage_zero for bank 0): magnitude [m], unit vector
+LOKI_JSON_TRANSLATIONS = {
+    0: (5.0975599309865895, (0.09808614450232256, 0.15321055771262784, 0.9833135986357836)),
+    1: (3.0264972377320944, (0.16520748598953786, 0.23467392969841872, 0.9579324784622967)),
+    2: (3.3808738879319353, (0.1585211450545504, -0.07394537870589542, 0.9845827174689975)),
+    3: (2.997243043948889, (0.1668199717768788, -0.09553112503774741, 0.9813485115724095)),
+    4: (3.3699024365996118, (-0.06661617189918438, -0.0741861239912517, 0.9950169368652239)),
+    5: (1.6727540228616997, (0.418471568702289, 0.6556074503553417, 0.6285383180255708)),
+    6: (2.0188920948381566, (0.5900018148793079, -0.3046225212196401, 0.7477318891186284)),
+    7: (1.4237046781197287, (0.351196429768247, -0.25662625516025345, 0.9004465741399993)),
+    8: (1.7887985600676228, (-0.18203279411611917, -0.30746894160022586, 0.9339844280380243)),
+}
+
+
+# offsets [mm] of the first pixel of the 7 straws of tube 0 (pixel ids first + s * 512)
+LOKI_JSON_TUBE0_STRAW_OFFSETS_MM = {
+    0: [[-0.977, -1.14, -7.67], [-0.977, -7.21, -2.85], [-0.977, -6.07, 4.82], [-0.977, 0.0, 0.0],
+        [-0.977, 6.07, -4.82], [-0.977, 7.21, 2.85], [-0.977, 1.14, 7.67]],
+    1: [[-0.977, 0.38, -7.74], [-0.977, 6.9, -3.54], [-0.977, 6.52, 4.2], [-0.977, 0.0, 0.0],
+        [-0.977, -6.52, -4.2], [-0.977, -6.9, 3.54], [-0.977, -0.38, 7.74]],
+    2: [[0.54, 0.488, -7.74], [6.97, 0.488, -3.4], [6.43, 0.488, 4.34], [0.0, 0.488, 0.0],
+        [-6.43, 0.488, -4.34], [-6.97, 0.488, 3.4], [-0.54, 0.488, 7.74]],
+    3: [[-0.977, -0.38, -7.75], [-0.977, -6.9, -3.54], [-0.977, -6.52, 4.2], [-0.977, 0.0, 0.0],
+        [-0.977, 6.52, -4.2], [-0.977, 6.9, 3.54], [-0.977, 0.38, 7.75]],
+    4: [[-0.54, 0.488, -7.74], [-6.97, 0.488, -3.4], [-6.43, 0.488, 4.34], [0.0, 0.488, 0.0],
+        [6.43, 0.488, -4.34], [6.97, 0.488, 3.4], [0.54, 0.488, 7.74]],
+    5: [[-1.172, -1.21, -7.66], [-1.172, 6.03, -4.88], [-1.172, 7.24, 2.78], [-1.172, 0.0, 0.0],
+        [-1.172, -7.24, -2.78], [-1.172, -6.03, 4.88], [-1.172, 1.21, 7.66]],
+    6: [[-0.28, 1.172, -7.75], [6.57, 1.172, -4.12], [6.85, 1.172, 3.63], [0.0, 1.172, 0.0],
+        [-6.85, 1.172, -3.63], [-6.57, 1.172, 4.12], [0.28, 1.172, 7.75]],
+    7: [[-1.172, 1.21, -7.66], [-1.172, -6.03, -4.88], [-1.172, -7.24, 2.78], [-1.172, 0.0, 0.0],
+        [-1.172, 7.24, -2.78], [-1.172, 6.03, 4.88], [-1.172, -1.21, 7.66]],
+    8: [[0.28, 1.172, -7.75], [-6.57, 1.172, -4.12], [-6.85, 1.172, 3.63], [0.0, 1.172, 0.0],
+        [6.85, 1.172, -3.63], [6.57, 1.172, 4.12], [-0.28, 1.172, 7.75]],
+}  # fmt: skip
+
+
+# pixel offsets [m] of a few pixels per bank (local index in the bank: offset), 5 decimals
+# across the straws, and the pixel_shape vertices [m] (a pixel_base shape, see below)
+LOKI_JSON_SAMPLE_OFFSETS_M = {
+    0: {0: (-0.0009765625, -0.00114, -0.00767), 511: (-0.9990234375, -0.00114, -0.00767),
+        1536: (-0.0009765625, 0.0, 0.0), 401664: (-0.5009765625, 0.01142, 0.04485),
+        802441: (-0.2685546875, -1.54202, 0.08645), 802815: (-0.9990234375, -1.54202, 0.08645)},
+    1: {0: (-0.0009765625, 0.00038, -0.00774), 511: (-0.9990234375, 0.00038, -0.00774),
+        1536: (-0.0009765625, 0.0, 0.0), 114944: (-0.5009765625, -0.00695333333333334, 0.04576),
+        229001: (-0.2685546875, -0.43528, 0.13023), 229375: (-0.9990234375, -0.43528, 0.13023)},
+    2: {0: (0.00054, 0.00048828125, -0.00774), 511: (0.00054, 0.49951171875, -0.00774),
+        1536: (0.0, 0.00048828125, 0.0), 86272: (-0.00791333333333342, 0.25048828125, 0.04559333333333338),
+        171657: (-0.32467, 0.13427734375, 0.11217), 172031: (-0.32467, 0.49951171875, 0.11217)},
+    3: {0: (-0.0009765625, -0.00038, -0.00775), 511: (-0.9990234375, -0.00038, -0.00775),
+        1536: (-0.0009765625, 0.0, 0.0), 114944: (-0.5009765625, 0.00694666666666667, 0.04575),
+        229001: (-0.2685546875, -0.41253, 0.04577), 229375: (-0.9990234375, -0.41253, 0.04577)},
+    4: {0: (-0.00054, 0.00048828125, -0.00774), 511: (-0.00054, 0.49951171875, -0.00774),
+        1536: (0.0, 0.00048828125, 0.0), 86272: (0.00790666666666668, 0.25048828125, 0.04559333333333338),
+        171657: (-0.29823, 0.13427734375, 0.0633), 172031: (-0.29823, 0.49951171875, 0.0633)},
+    5: {0: (-0.001171875, -0.00121, -0.00766), 511: (-1.198828125, -0.00121, -0.00766),
+        1536: (-0.001171875, 0.0, 0.0), 200960: (-0.601171875, 0.00255666666666662, 0.04620666666666665),
+        401033: (-0.322265625, -0.72447, 0.31897), 401407: (-1.198828125, -0.72447, 0.31897)},
+    6: {0: (-0.00028, 0.001171875, -0.00775), 511: (-0.00028, 1.198828125, -0.00775),
+        1536: (0.0, 0.001171875, 0.0), 229632: (-0.00301333333333348, 0.601171875, 0.04618333333333331),
+        458377: (-0.86921, 0.322265625, 0.25053), 458751: (-0.86921, 1.198828125, 0.25053)},
+    7: {0: (-0.001171875, 0.00121, -0.00766), 511: (-1.198828125, 0.00121, -0.00766),
+        1536: (-0.001171875, 0.0, 0.0), 143616: (-0.601171875, -0.00255666666666666, 0.04620666666666665),
+        286345: (-0.322265625, -0.5215, -0.07373), 286719: (-1.198828125, -0.5215, -0.07373)},
+    8: {0: (0.00028, 0.001171875, -0.00775), 511: (0.00028, 1.198828125, -0.00775),
+        1536: (0.0, 0.001171875, 0.0), 229632: (0.00301333333333337, 0.601171875, 0.04618333333333317),
+        458377: (-0.8617, 0.322265625, -0.07254), 458751: (-0.8617, 1.198828125, -0.07254)},
+}  # fmt: skip
+
+
+LOKI_JSON_PIXEL_SHAPE_VERTICES_M = {
+    0: ((0.0, 0.0, 0.0), (0.0, -0.002415912617779831, 0.002868077095067739), (-0.001953125, 0.0, 0.0)),
+    1: ((0.0, 0.0, 0.0), (0.0, -0.0027514190021446145, 0.0025479783112572862), (-0.001953125, 0.0, 0.0)),
+    2: ((0.0, 0.0, 0.0), (-0.0028043736453638736, 0.0, 0.002489575959312858), (0.0, 0.0009765625, 0.0)),
+    3: ((0.0, 0.0, 0.0), (0.0, -0.0026875706994991854, 0.002615236841128057), (-0.001953125, 0.0, 0.0)),
+    4: ((0.0, 0.0, 0.0), (-0.0026321597107023453, 0.0, 0.002670998925000784), (0.0, 0.0009765625, 0.0)),
+    5: ((0.0, 0.0, 0.0), (0.0, -0.0021720306529693584, 0.0030569237547838023), (-0.00234375, 0.0, 0.0)),
+    6: ((0.0, 0.0, 0.0), (-0.002523471559563634, 0.0, 0.0027739126316583007), (0.0, 0.00234375, 0.0)),
+    7: ((0.0, 0.0, 0.0), (0.0, -0.0031656205537874595, 0.0020103100530610638), (-0.00234375, 0.0, 0.0)),
+    8: ((0.0, 0.0, 0.0), (-0.0029001153354025234, 0.0, 0.002377357996045844), (0.0, 0.00234375, 0.0)),
+}  # fmt: skip
+
+
+def loki_json_structure(bank_id):
+    """Structure of a loki_detector_<id> group in loki.json, in the form of _structure()
+    (without detector_events)."""
+    units = (("units", "string"),)
+    datasets = [
+        ("detector_number", "dataset", "int32", ()),
+        (
+            "pixel_shape",
+            "group",
+            (("NX_class", "NXcylindrical_geometry"),),
+            (("cylinders", "dataset", "int32", ()), ("vertices", "dataset", "float", units)),
+        ),
+        ("x_pixel_offset", "dataset", "float", units),
+        ("y_pixel_offset", "dataset", "float", units),
+        ("z_pixel_offset", "dataset", "float", units),
+    ]
+    if bank_id != lnj.CARRIAGE_BANK_ID:
+        datasets.append(
+            (
+                "transformations",
+                "group",
+                (("NX_class", "NXtransformations"),),
+                ((f"trans_{bank_id + 1}", *LOKI_JSON_TRANSLATION_STRUCTURE[1:]),),
+            )
+        )
+    datasets.append(("depends_on", "dataset", "string", ()))
+    return (lnj.bank_name(bank_id), "group", (("NX_class", "NXdetector"),), tuple(datasets))
+
+
+LOKI_JSON_TRANSLATION_STRUCTURE = (
+    "detector_carriage_zero",
+    "dataset",
+    "float",
+    (
+        ("transformation_type", None),
+        ("depends_on", "string"),
+        ("vector", "float"),
+        ("units", "string"),
+    ),
+)
+
+
+LOKI_JSON_DEPENDS_ON = ["/entry/instrument/detector_carriage/value"] + [
+    f"/entry/instrument/loki_detector_{b}/transformations/trans_{b + 1}" for b in range(1, 9)
+]
 
 
 def child(node, name):
     return vnj._child(node, name)
+
+
+def values(node):
+    return node["config"]["values"]
 
 
 @pytest.fixture(scope="module")
@@ -83,57 +242,204 @@ def test_pixel_shape_is_a_cylinder_of_one_pixel(pixel_reference):
     assert np.dot(radius, axis) == pytest.approx(0.0, abs=1e-6)
 
 
-def test_pixel_shape_is_centred_on_pixel_centres():
-    bank = lbp.compute_bank_pixels(5, REFERENCE_BANKS_DATA[5], 2, pixel_reference=lbp.PIXEL_CENTRE)
-    vertices = shape_vertices_mm(bank)
-    assert np.allclose(vertices[0] + vertices[2], 0.0, atol=1e-5)
+def test_pixel_shape_is_the_same_cylinder_for_both_references():
+    """Same cylinder, only placed differently relative to the offset point."""
+    shapes = {
+        ref: lnj.pixel_shape_vertices(
+            lbp.compute_bank_pixels(8, REFERENCE_BANKS_DATA[8], 4, pixel_reference=ref)
+        )
+        for ref in lbp.PIXEL_REFERENCES
+    }
+    centre, base = shapes[lbp.PIXEL_CENTRE], shapes[lbp.PIXEL_BASE]
+    assert np.allclose(centre - centre[0], base - base[0])
+    assert np.allclose(base[0], 0.0)
+    assert np.allclose((centre[0] + centre[2]) / 2, 0.0)
 
 
-def test_pixel_shape_starts_at_pixel_bases():
-    bank = lbp.compute_bank_pixels(5, REFERENCE_BANKS_DATA[5], 2, pixel_reference=lbp.PIXEL_BASE)
-    vertices = shape_vertices_mm(bank)
-    assert np.allclose(vertices[0], 0.0, atol=1e-5)
-
-
-def test_round_trip_through_a_file(tmp_path, reference_pixels):
-    filename = tmp_path / "pixels.json"
-    lnj.write_json(lnj.build_output(reference_pixels, "test"), filename)
-    banks = vnj.read_pixel_positions(filename)
-    assert sorted(banks) == list(range(9))
-    for bank_id, (ids, positions) in banks.items():
-        assert np.array_equal(ids, reference_pixels[bank_id].pixel_ids)
-        assert (
-            np.abs(positions - reference_pixels[bank_id].positions).max() < 1e-4
-        )  # 1e-8 m rounding
+def json_faces_mm(output, bank_id):
+    """(first face centres, second face centres) of all pixel cylinders of a bank
+    as described by the JSON output [mm]."""
+    group = output[lnj.bank_name(bank_id)]
+    ids, positions = vnj.bank_pixels_from_group(
+        group, output.get(lnj.CARRIAGE_ZERO_NAME), use_pixel_shape=False
+    )
+    vertices = np.array(values(child(child(group, "pixel_shape"), "vertices"))) * 1000
+    return ids, positions + vertices[0], positions + vertices[2]
 
 
 @pytest.mark.parametrize("pixel_reference", lbp.PIXEL_REFERENCES)
-def test_verification_of_geant4_corners_passes(tmp_path, pixel_reference):
-    """Both pixel reference conventions describe the same pixel centres."""
-    corners = {bank_id: g4.bank_corners(bank_id, 2) for bank_id in (0, 2, 7)}
-    filename = tmp_path / "pixels.json"
-    pixels = lbp.compute_instrument_pixels(corners, 2, pixel_reference=pixel_reference)
-    lnj.write_json(lnj.build_output(pixels, "geant4"), filename)
-    results = vnj.compare_with_geant4(vnj.read_pixel_positions(filename), 2)
-    assert max(deviation for deviation, _ in results.values()) < 1e-4
+@pytest.mark.parametrize("bank_id", [0, 1, 6, 7])
+def test_json_pixel_cylinders_tile_the_straws(pixel_reference, bank_id):
+    """The pixel cylinders of the JSON output fill every straw from its first to
+    its last pixel end without gaps or overlaps (whatever the pixel reference):
+    guards against the half-pixel pixel_shape shift of the current loki.json."""
+    n = 3
+    pixels = lbp.compute_instrument_pixels(
+        {bank_id: REFERENCE_BANKS_DATA[bank_id]}, n, pixel_reference=pixel_reference
+    )
+    output = json.loads(json.dumps(lnj.build_output(pixels, "test")))
+    _, first, second = json_faces_mm(output, bank_id)
+    first = first.reshape(-1, 7, n, 3)
+    second = second.reshape(-1, 7, n, 3)
+    frame = pixels[bank_id].frame
+    straw_starts = (
+        frame.origin + lbp.tube_offsets(frame)[:, None, :] + lbp.straw_offsets(frame)[None, :, :]
+    )
+    atol = 1e-4  # 1e-8 m rounding
+    assert np.allclose(first[:, :, 0], straw_starts, atol=atol)
+    assert np.allclose(second[:, :, :-1], first[:, :, 1:], atol=atol)
+    assert np.allclose(second[:, :, -1], straw_starts + frame.along * frame.straw_length, atol=atol)
 
 
-def test_verification_detects_an_inconsistent_pixel_shape(tmp_path):
-    """Pixel centre offsets with a pixel_base shape (as in the current loki.json)."""
-    corners = {6: g4.bank_corners(6, 2)}
-    bank_centre = lbp.compute_instrument_pixels(corners, 2, pixel_reference=lbp.PIXEL_CENTRE)
-    bank_base = lbp.compute_instrument_pixels(corners, 2, pixel_reference=lbp.PIXEL_BASE)
-    output = lnj.build_output(bank_centre, "geant4")
-    shape = child(output["loki_detector_6"], "pixel_shape")
-    shape["children"] = child(lnj.bank_group(bank_base[6]), "pixel_shape")["children"]
-    filename = tmp_path / "pixels.json"
+def test_json_is_in_metres():
+    bank_id = 5
+    pixels = lbp.compute_instrument_pixels({bank_id: REFERENCE_BANKS_DATA[bank_id]}, 2)
+    group = lnj.build_output(pixels, "test")[lnj.bank_name(bank_id)]
+    offsets = np.column_stack([values(child(group, f"{a}_pixel_offset")) for a in "xyz"])
+    assert np.allclose(offsets, pixels[bank_id].offsets / 1000, atol=1e-8)
+    translation = child(child(group, "transformations"), "trans_6")
+    vector = np.array(vnj._attribute(translation, "vector"))
+    assert np.linalg.norm(vector) == pytest.approx(1.0)
+    assert np.allclose(
+        values(translation) * vector, np.array(REFERENCE_BANKS_DATA[5]["A"][0]) / 1000
+    )
+    vertices = np.array(values(child(child(group, "pixel_shape"), "vertices")))
+    assert np.linalg.norm(vertices[1] - vertices[0]) == pytest.approx(c.STRAW_RADIUS / 1000)
+
+    def all_units(node):
+        for attr in node.get("attributes", []):
+            if attr["name"] == "units":
+                yield attr["values"]
+        for sub in node.get("children", []):
+            yield from all_units(sub)
+
+    assert set(all_units(group)) == {"m"}
+
+
+def _structure(node):
+    """Names, types, dtypes and attributes (without values) of a NeXus-JSON node tree."""
+    if "module" in node:
+        config = node.get("config", {})
+        return (
+            config.get("name"),
+            node["module"],
+            config.get("dtype"),
+            tuple((a["name"], a.get("dtype")) for a in node.get("attributes", [])),
+        )
+    return (
+        node.get("name"),
+        node.get("type"),
+        tuple((a["name"], a.get("values")) for a in node.get("attributes", [])),
+        tuple(
+            _structure(sub)
+            for sub in node.get("children", [])
+            if sub.get("name") != "detector_events"
+        ),
+    )
+
+
+def test_json_structure_matches_loki_json():
+    """Same groups, datasets, dtypes, attributes and depends_on paths as the instrument file."""
+    pixels = lbp.compute_instrument_pixels(REFERENCE_BANKS_DATA, 1)
+    output = lnj.build_output(pixels, "test")
+    for bank_id in ALL_BANKS:
+        ours = output[lnj.bank_name(bank_id)]
+        assert _structure(ours) == loki_json_structure(bank_id)
+        assert values(child(ours, "depends_on")) == LOKI_JSON_DEPENDS_ON[bank_id]
+    assert _structure(output[lnj.CARRIAGE_ZERO_NAME]) == LOKI_JSON_TRANSLATION_STRUCTURE
+
+
+def test_translations_match_loki_json():
+    pixels = lbp.compute_instrument_pixels(REFERENCE_BANKS_DATA, 1)
+    output = lnj.build_output(pixels, "test")
+    for bank_id, (magnitude, vector) in LOKI_JSON_TRANSLATIONS.items():
+        if bank_id == lnj.CARRIAGE_BANK_ID:
+            node = output[lnj.CARRIAGE_ZERO_NAME]
+        else:
+            group = output[lnj.bank_name(bank_id)]
+            node = child(child(group, "transformations"), f"trans_{bank_id + 1}")
+        assert values(node) == pytest.approx(magnitude, abs=1e-8)
+        assert np.allclose(vnj._attribute(node, "vector"), vector, atol=1e-12)
+
+
+def test_bank_pixel_id_ranges_match_loki_json():
+    for bank_id in ALL_BANKS:
+        ids = lbp.bank_pixel_ids(bank_id, 512)
+        assert ids[0] == LOKI_JSON_FIRST_IDS_512[bank_id]
+        assert len(ids) == LOKI_JSON_PIXELS_PER_BANK_512[bank_id]
+    assert lbp.bank_pixel_ids(8, 512)[-1] == 3211264
+
+
+@pytest.mark.parametrize("bank_id", ALL_BANKS)
+def test_tube0_straw_positions_match_loki_json(bank_id):
+    """Straw order and mirroring in the upside-down banks and the pixel centre
+    offset along the straw, for all 7 straws of tube 0."""
+    bank = lbp.compute_bank_pixels(bank_id, REFERENCE_BANKS_DATA[bank_id], 512)
+    first_pixels = bank.offsets[[straw * 512 for straw in range(7)]]
+    # loki.json: 5 decimals in m, straw distance sqrt(1.14^2 + 7.67^2) = 7.754 mm
+    assert np.allclose(first_pixels, LOKI_JSON_TUBE0_STRAW_OFFSETS_MM[bank_id], atol=0.015)
+
+
+@pytest.fixture(scope="module")
+def pixels_512():
+    return lbp.compute_instrument_pixels(REFERENCE_BANKS_DATA, 512)
+
+
+@pytest.mark.parametrize("bank_id", ALL_BANKS)
+def test_pixel_offsets_agree_with_loki_json(pixels_512, bank_id):
+    """loki.json was made from the same corners; its straw positions are rounded
+    to 5 decimals in m, so the offsets agree within 0.011 mm."""
+    offsets = pixels_512[bank_id].offsets
+    for index, expected in LOKI_JSON_SAMPLE_OFFSETS_M[bank_id].items():
+        assert np.abs(offsets[index] - np.array(expected) * 1000).max() < 0.011
+
+
+@pytest.mark.parametrize("bank_id", ALL_BANKS)
+def test_loki_json_pixel_shape_is_shifted_by_half_a_pixel(pixels_512, bank_id):
+    """Documents the known issue of loki.json: its offsets point to the pixel
+    centres, but its pixel shape starts at the offset point (a pixel_base shape),
+    so its pixel volumes are shifted by half a pixel along the straws. Our
+    pixel_centre output centres the shape on the offset point."""
+    bank = pixels_512[bank_id]
+    first_offset = np.array(LOKI_JSON_SAMPLE_OFFSETS_M[bank_id][0]) * 1000
+    along = np.dot(first_offset, bank.frame.along)
+    assert along == pytest.approx(bank.pixel_length / 2, abs=1e-6)  # pixel centre offsets
+    vertices = np.array(LOKI_JSON_PIXEL_SHAPE_VERTICES_M[bank_id]) * 1000
+    shape_centre = (vertices[0] + vertices[2]) / 2
+    assert np.linalg.norm(shape_centre) == pytest.approx(bank.pixel_length / 2, abs=1e-6)
+    ours = lnj.pixel_shape_vertices(bank) * 1000
+    assert np.allclose(ours[0] + ours[2], 0.0, atol=1e-5)
+
+
+@pytest.fixture(scope="module", params=[True, False], ids=["pixel_centres", "straw_ends"])
+def measured_corners(request):
+    """Corners calibrated from the package survey (banks 1-8; bank 0 was not measured)."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        data = survey.get_measured_calibration_data(SAM606.path, verbose=False)
+        detectors = calibration.Detectors(data, request.param, run_checks=False)
+    return detectors.formatted_data()
+
+
+def test_measured_corners_json_without_bank_0(tmp_path, measured_corners):
+    """Measured data lacks bank 0: no detector_carriage_zero, global ids kept,
+    and the JSON reproduces the model positions."""
+    pixels = lbp.compute_instrument_pixels(measured_corners, 2)
+    output = lnj.build_output(pixels, "measured")
+    assert lnj.CARRIAGE_ZERO_NAME not in output
+    assert lnj.bank_name(0) not in output
+    filename = tmp_path / "measured.json"
     lnj.write_json(output, filename)
-    deviation, _ = vnj.compare_with_geant4(vnj.read_pixel_positions(filename), 2)[6]
-    assert deviation == pytest.approx(bank_centre[6].pixel_length / 2, abs=1e-4)
-    ignoring_shape, _ = vnj.compare_with_geant4(
-        vnj.read_pixel_positions(filename, use_pixel_shape=False), 2
-    )[6]
-    assert ignoring_shape < 1e-4
+    banks = vnj.read_pixel_positions(filename)
+    assert sorted(banks) == list(range(1, 9))
+    for bank_id, (ids, positions) in banks.items():
+        assert np.array_equal(ids, pixels[bank_id].pixel_ids)
+        assert np.abs(positions - pixels[bank_id].pixel_centres).max() < 1e-4
+
+
+def run_main(tmp_path, *args):
+    filename = tmp_path / "out.json"
+    lnj.main(["-o", str(filename), *args])
+    return json.loads(filename.read_text())
 
 
 def test_main_writes_selected_banks(tmp_path):
@@ -159,3 +465,72 @@ def test_main_writes_selected_banks(tmp_path):
     assert data["info"]["pixels_per_straw"] == 2
     assert data["info"]["pixel_reference"] == "pixel_base"
     assert vnj.main([str(filename), "--tolerance", "1.0"]) == 0
+
+
+def test_main_bank_subset_keeps_the_global_pixel_ids(tmp_path):
+    data = run_main(tmp_path, "--pixels-per-straw", "2", "--banks", "5")
+    ids = values(child(data["loki_detector_5"], "detector_number"))
+    assert ids[0] == lbp.bank_first_pixel_id(5, 2) == 1 + 2 * 7 * sum(c.TUBES_PER_BANK[:5])
+    assert len(ids) == 112 * 7 * 2
+    assert lnj.CARRIAGE_ZERO_NAME not in data
+
+
+def test_main_writes_the_carriage_zero_with_bank_0(tmp_path):
+    data = run_main(tmp_path, "--pixels-per-straw", "1", "--banks", "0")
+    assert np.allclose(
+        vnj.translation_mm(data[lnj.CARRIAGE_ZERO_NAME]), REFERENCE_BANKS_DATA[0]["A"][0]
+    )
+    assert child(data["loki_detector_0"], "transformations") is None
+
+
+def test_main_default_is_pixel_centre_and_256_pixels(tmp_path):
+    data = run_main(tmp_path, "--banks", "2")
+    assert data["info"]["pixels_per_straw"] == 256
+    assert data["info"]["pixel_reference"] == lbp.PIXEL_CENTRE
+    vertices = np.array(values(child(child(data["loki_detector_2"], "pixel_shape"), "vertices")))
+    assert np.allclose(vertices[0] + vertices[2], 0.0)
+    assert np.linalg.norm(vertices[2] - vertices[0]) == pytest.approx(0.5 / 256, abs=1e-8)
+
+
+def test_main_decimals_option_rounds_the_metre_values(tmp_path):
+    """--decimals is otherwise untested: 4 decimals in m = 0.1 mm grid."""
+    filename = tmp_path / "out.json"
+    lnj.main(["-o", str(filename), "--banks", "7", "--pixels-per-straw", "2", "--decimals", "4"])
+    group = json.loads(filename.read_text())["loki_detector_7"]
+    offsets = np.column_stack(
+        [vnj._child(group, f"{axis}_pixel_offset")["config"]["values"] for axis in "xyz"]
+    )
+    assert np.allclose(offsets * 1e4, np.round(offsets * 1e4), atol=1e-6)
+    exact = lbp.compute_bank_pixels(7, REFERENCE_BANKS_DATA[7], 2).offsets / 1000
+    assert np.abs(offsets - exact).max() <= 0.5e-4 + 1e-12
+    translation = vnj._child(vnj._child(group, "transformations"), "trans_8")
+    assert translation["config"]["values"] == round(translation["config"]["values"], 4)
+
+
+@pytest.mark.parametrize("pixels_per_straw", ["0", "-2"])
+def test_main_rejects_invalid_pixels_per_straw(tmp_path, pixels_per_straw):
+    with pytest.raises(SystemExit, match="2"):
+        lnj.main(
+            [
+                "-o",
+                str(tmp_path / "out.json"),
+                "--pixels-per-straw",
+                pixels_per_straw,
+                "--banks",
+                "2",
+            ]
+        )
+
+
+@pytest.mark.parametrize("banks", [["9"], ["-1"], []])
+def test_main_rejects_unknown_or_missing_bank_ids(tmp_path, banks):
+    with pytest.raises(SystemExit, match="2"):
+        lnj.main(["-o", str(tmp_path / "out.json"), "--banks", *banks])
+    assert not (tmp_path / "out.json").exists()
+
+
+@pytest.mark.parametrize("decimals", ["3", "-1"])
+def test_main_rejects_too_coarse_decimals(tmp_path, decimals):
+    with pytest.raises(SystemExit, match="2"):
+        lnj.main(["-o", str(tmp_path / "out.json"), "--banks", "2", "--decimals", decimals])
+    assert not (tmp_path / "out.json").exists()

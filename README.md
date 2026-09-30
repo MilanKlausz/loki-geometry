@@ -1,7 +1,7 @@
 # loki-geometry – LOKI detector bank geometry
 
-Tools to derive the 8 corner positions of each LOKI detector bank from the as-built survey of the
-detector tubes (SAM-606), and to turn corner positions into the pixel geometry (bank positions,
+Tools to derive the 8 corner positions of each LOKI detector bank from a survey of the detector tubes
+(e.g. SAM-606), and to turn corner positions into the pixel geometry (bank positions,
 detector numbers and pixel offsets of all 1,605,632 pixels) for the NeXus/JSON instrument file.
 The pixel positions are checked against the LOKI Geant4 geometry, [G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki),
 through a Python port of its pixel position code (`geant4`).
@@ -14,7 +14,7 @@ The tests need pytest.
 ```
 pip install .                          # from a clone of the repository
 pip install -e ".[test]"               # editable install for development, with pytest
-pip install "git+<repository URL>"     # directly from the git repository
+pip install "git+https://github.com/MilanKlausz/loki-geometry.git"   # directly from the git repository
 ```
 
 This installs the package and the command-line tools `loki-calibrate`, `loki-survey`, `loki-pixel-json`,
@@ -56,20 +56,20 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 | `calibration` (`loki-calibrate`) | The calibration: calibration data → 8 corner positions per bank, quality report, comparison with the intended geometry, output in the `REFERENCE_BANKS_DATA` format. |
 | `reference_data` | `REFERENCE_BANKS_DATA`: the intended corner positions (exact CAD values) and a converter to the calibration data format. This is the "intended" geometry of the comparisons. |
 | `geant4_example_data` | Calibration data from the Geant4 geometry (first and last pixel centres of the centre straw of two front-layer tubes per bank, all 9 banks), generated with `geant4`. Used to test the calibration. |
-| `geant4` (`loki-geant4-validate`) | Python port of the Geant4 pixel centre calculation (`AimHelper::getPixelCentreCoordinates` of [G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki)). It matches the C++ code to 1e-12 mm for all pixels (checked once with 1, 2, 3, 256 and 512 pixels per straw), and the `sb_loki_info` values hard-coded in the tests to 1e-6 mm. |
-| `bank_pixels` | Pixel geometry core: from the 8 corners of a bank to the detector numbers and the pixel centre offsets of all its pixels (tube grid from vector steps between the corners, straw layout of Geant4, mirrored straw pattern for the upside-down banks 1, 2, 5, 6 derived from the corners). Inconsistent corners (> 0.1 mm) and a straw pattern that does not match the bank are rejected. |
+| `geant4` (`loki-geant4-validate`) | Python port of the Geant4 pixel centre calculation (`AimHelper::getPixelCentreCoordinates` of [G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki)). It matches the C++ code to 1e-12 mm for all pixels (checked once with 1, 2, 3, 7, 256 and 512 pixels per straw), and the Geant4 values hard-coded in `geant4.py` (`sb_loki_info` output, used by `loki-geant4-validate`) and in `tests/test_geant4.py` (`sb_loki_info` and `LokiAimHelper` output) to 1e-6 mm. |
+| `bank_pixels` | Pixel geometry core: from the 8 corners of a bank to the detector numbers and the pixel offsets (pixel centres or bases) of all its pixels (tube grid from vector steps between the corners, straw layout of Geant4, mirrored straw pattern for the upside-down banks 1, 2, 5, 6 derived from the corners). Corners are rejected if they are not finite, not consistent with each other (> 0.1 mm), have other tube pitches than 28.40 / 27.00 mm (> 0.5 mm, e.g. corners of another bank), are in the wrong order (a left-handed frame: first / last pixel ends swapped, or A[1] / A[2] swapped) or give a straw pattern that does not match the bank. |
 | `nexus_json` (`loki-pixel-json`) | Writes the pixel geometry as NeXus-JSON nodes (the geometry parts of the `loki_detector_<id>` groups, plus `detector_carriage_zero` for the rear bank), ready to be copied into the instrument JSON file. Uses `REFERENCE_BANKS_DATA` for now. |
 | `verify_json` (`loki-verify-json`) | Compares the pixel positions of a NeXus-JSON file (the output above, or a full file like `loki.json`) with the Geant4 geometry. Python counterpart of `scripts/verifyJSON` of G4GeoLoki. |
 | `nominal_corners` (`loki-nominal-corners`) | Rebuilds the intended corner positions from the nominal bank distances, angles and offsets, and compares them with `REFERENCE_BANKS_DATA`. |
 
 Repository layout:
 - `src/loki_geometry/`: the package; `src/loki_geometry/data/` holds the survey files.
-- `tests/`: the pytest tests (pixel geometry, JSON export and verification, Geant4 port, survey and calibration,
-  constants, command-line tools and this README).
+- `tests/`: the pytest tests, one file per module (`tests/test_<module>.py`), plus `tests/test_cli_and_docs.py` for the
+  command-line tools, this README and the packaging.
 - `pyproject.toml`: packaging (setuptools), command-line tools, pytest settings.
 - `*_local/` (e.g. `sources_local/`): local material that is not version controlled, like documents, drawings, raw survey
   files and large JSON files. The package and the tests never read it; the values of the current instrument file
-  (`loki.json`) that the tests compare with are hard-coded in `tests/test_pixel_details.py`.
+  (`loki.json`) that the tests compare with are hard-coded in `tests/test_nexus_json.py`.
 
 ## From the measured points to the 8 corner positions
 
@@ -81,25 +81,34 @@ The survey is the default SAM-606 file; another known file is given with `--surv
 Steps 1–4 use the file's entry in `survey_files` (here `SAM606`):
 
 1. **Read the survey** (`survey.read_measured_points`) and look up its entry (`survey_files.survey_file_info`: by file
-   name, and the content must match the entry's checksum). `label, X, Y, Z` lines.
+   name, and, if the entry has a checksum, the content must match it). `label, X, Y, Z` lines.
    SAM-606 labels: `C1`/`C2` = front/middle carriage, `U/D/L/R` = up/down/left/right bank, `P<n>` = the surveyors' pipe
    number, `I`/`II` = the two ends of the tube.
 2. **Apply the fixes of the file**. SAM-606 has one, `sam606_fix_bank5_mislabelled_tube`: `C1UP8I` and `C1UP8II` are on two
    different tubes (UP9 and UP8). Assuming parallel tubes, the missing end of tube UP9 is rebuilt as
    `C1UP8I + (C1UP3II − C1UP3I)`, and `C1UP8II` is dropped. A check confirms that the dropped point is one tube pitch
    (28.4 mm) from the rebuilt one.
-3. **Convert the frame** (the entry's `frame`; SAM-606: `tank_window_frame`): x = Y, y = Z, z = X + D, where
-   D = `survey.SAMPLE_TO_TANK_WINDOW_DISTANCE` is the sample-to-window distance. **D is provisional (100 mm)**; override it
-   with `--sample-to-window-distance`. D shifts every bank equally along z and doesn't affect any of the quality numbers.
+3. **Convert to the sample frame** (the entry's `frame`): the survey can be in any coordinate system, as long as its
+   entry defines the conversion to the NeXus frame with the origin at the sample (without a `frame` the values are used
+   as given). Example: SAM-606 is in the TANK WINDOW coordinate system (X along the beam, Y left, Z up, origin at the
+   tank window); `tank_window_frame` gives x = Y, y = Z, z = X + D, with D = `SAMPLE_TO_TANK_WINDOW_DISTANCE` the
+   distance from the sample to the window. Such a shift along z moves every bank equally; it does not change the fit
+   quality numbers or the tilts, only the distances and position angles compared with the intended geometry.
 4. **Identify the tubes** (the entry's `label_map`, `survey.group_points_into_tubes`): each label is mapped to (bank, local
    tube id). The surveyors' P numbers do not follow our numbering. `C1DP31` is really tube 18, for example. Every point
-   must belong to a mapped tube and every mapped tube must have both ends. The first pixel end of each tube is chosen from
-   the coordinates (+x / −y).
-5. **Sanity checks** (with `--verbose`): the two tubes of a bank must be parallel; their distance divided by 28.4 mm must equal
-   the tube id difference; each tube's position across the bank must match its assigned id in the nominal geometry.
-6. **Remove the end electronics** (`find_effective_tube_ends`): the measured tubes are ~30 mm longer than the effective straw
-   length. Both ends are moved inwards by half the excess, along the line through the two points.
-   The same function stretches Geant4 end pixel centres to the straw ends.
+   must belong to a mapped tube and every mapped tube must have both ends; the label map must use known banks and front
+   layer tube ids, each tube once; each tube must be at least half a straw length long (errors otherwise). The first
+   pixel end of each tube is chosen from the coordinates (+x / −y).
+5. **Sanity checks** (always run; all results are printed with `--verbose`, otherwise only the failing ones as
+   `WARNING` lines): the two tubes of a bank must be parallel; their distance divided by 28.4 mm must equal the tube id
+   difference; each tube's position across the bank must match its assigned id in the nominal geometry; the length
+   removed in step 6 must be 20–40 mm (`survey.EXCESS_LENGTH_RANGE`, set for points at the physical tube ends).
+6. **Adjust the tube ends to the straw length** (`find_effective_tube_ends`): if the distance of the two measured points
+   of a tube differs from the effective straw length of the bank, both points are moved symmetrically along the line
+   through them (closer or farther) until it matches, i.e. the difference is assumed to be split equally between the
+   two ends. This allows measuring points that are not the ends of the effective straw length, e.g. when the end
+   electronics make those inaccessible (the SAM-606 points are at the physical tube ends, ~30 mm longer). The same
+   function stretches Geant4 end pixel centres to the straw ends.
 7. **Build the bank** (`calibration.Bank`, full description in the module docstring):
    - average direction along the tubes
    - least-squares plane through the 4 points (numpy SVD)
@@ -107,10 +116,12 @@ Steps 1–4 use the file's entry in `survey_files` (here `SAM606`):
    - tube 0 position averaged from both tubes' midpoints; midpoints don't depend on symmetric errors of the ends
    - front layer corners from the effective straw length and the 28.40 mm tube pitch
    - back layer corners from +78.78 mm along the normal and ±18.84 mm in the plane
-   - input checks (error): the two tube ids must differ, both tubes must point the same way, and the normal must
-     point away from the sample (swapped first / last pixel ends would put the back layers in front of the bank)
+   - input checks (error): exactly 2 tubes per bank, the two tube ids must differ, both tubes must point the same way,
+     and the normal must point away from the sample (swapped first / last pixel ends, or a survey frame conversion that
+     mirrors the coordinates, would put the back layers in front of the bank)
 8. **Quality report** (`--verbose`, `Detectors.print_quality_report`), per bank:
-   - plane fit residual (with 4 points on 2 lines all 4 residuals are equal; it measures the twist of the two tube axes)
+   - plane fit residual (with 4 points on 2 lines all 4 residuals are equal in magnitude, with alternating signs; it
+     measures the twist of the two tube axes)
    - angle between the two tubes
    - spacing in tube pitches
    - disagreement of the two tubes' predictions of tube 0
@@ -118,8 +129,9 @@ Steps 1–4 use the file's entry in `survey_files` (here `SAM606`):
    - tilt angle, front face distance and front face centre shift vs the intended geometry
    - the placement in the drawing's terms (section distance, position angle, offset along the tubes)
 9. **Output** (`--print`, `Detectors.formatted_data`): the corners as straw ends in the `REFERENCE_BANKS_DATA` format,
-   the input of `bank_pixels` / `nexus_json`. Bank 0 is missing because it was not measured, so take it
-   from `REFERENCE_BANKS_DATA` or measure it. (Feeding the measured corners into `loki-pixel-json` is not wired up yet.)
+   the input of `bank_pixels` / `nexus_json`. Only the banks in the survey are in the output (e.g. SAM-606 has no
+   bank 0); take the others from `REFERENCE_BANKS_DATA`. (Feeding the measured corners into `loki-pixel-json` is not
+   wired up yet.)
 
 ## A new survey
 
@@ -137,8 +149,13 @@ SURVEY_FILES = {entry.file_name: entry for entry in (SAM606, NEW_SURVEY)}
 ```
 
 **Without a `frame`, the X, Y, Z values of the file are used as they are: they must already be in the NeXus frame (x left,
-y up, z along the beam, in mm) and RELATIVE TO THE SAMPLE POSITION.** A sample-to-window distance does not apply to such
-a file (`--sample-to-window-distance` is an error). If the survey is in another coordinate system, give a `frame`.
+y up, z along the beam, in mm) and RELATIVE TO THE SAMPLE POSITION.** If the survey is in another coordinate system, give
+a `frame`.
+
+The new file and entry are part of the package, so the installed package must include them: reinstall it with
+`pip install .` after adding them (and after every later change), or install it once with `pip install -e .`
+(editable), so that changes take effect immediately. Without installing, run the commands as
+`PYTHONPATH=src python3 -m loki_geometry.<module> …` from the repository root.
 
 1. **The file.** Put it in `src/loki_geometry/data/` with a new name ending in `.txt` (installed as package data). Format:
    one `label, X, Y, Z` line per point, in mm. The label is the surveyors' tube label followed by `I` or `II` for the two
@@ -147,14 +164,16 @@ a file (`--sample-to-window-distance` is an error). If the survey is in another 
 2. **The entry.** Add a `SurveyFile` next to `SAM606` and add it to the tuple of `SURVEY_FILES`. Required:
    - `file_name`: the name of the file.
    - `label_map`: {tube label without `I`/`II`: (bank id, local tube id)} (see [Conventions](#conventions)). To find the
-     ids, start with guessed ids and run step 3: the check "Tube id estimated from the nominal geometry" prints each
-     tube's id estimated from its position alone.
+     ids, start with guessed (but different) ids and run step 3 with `--verbose`: the check "Tube id estimated from the
+     nominal geometry" prints each tube's id estimated from its position alone.
 
    Optional:
-   - `frame`: a function `frame(point, sample_to_window_distance)` that converts a point of the file to the NeXus frame
-     relative to the sample (default: none, see above). For a file in the TANK WINDOW coordinate system of the survey
-     (X along the beam, Y left, Z up, origin at the tank window) use `tank_window_frame`; for any other system write a
-     new function, a proper rotation (determinant +1) plus a shift.
+   - `frame`: a function `frame(point)` that converts a point of the file (`np.array([X, Y, Z])`) to the NeXus frame
+     relative to the sample (default: none, see above). Everything the conversion needs, like the position of the
+     survey's origin relative to the sample, is part of the function. For a file in the TANK WINDOW coordinate system
+     of the survey (X along the beam, Y left, Z up, origin at the tank window) use `tank_window_frame`, which uses
+     `SAMPLE_TO_TANK_WINDOW_DISTANCE`; for any other system write a new function, a proper rotation (determinant +1)
+     plus a shift.
    - `checksum`: the checksum of the file content, from
      `python3 -c "from loki_geometry.survey_files import content_checksum; print(content_checksum('src/loki_geometry/data/NEW.txt'))"`.
      With a checksum, a file whose content differs from the entry (e.g. a corrected version under the same name) is
@@ -165,12 +184,15 @@ a file (`--sample-to-window-distance` is an error). If the survey is in another 
      should check its assumption and print a `WARNING` if it fails. See `sam606_fix_bank5_mislabelled_tube`.
    - `bank_notes`: notes printed with the checks of a bank (e.g. a tube made parallel by a fix).
 
-   To make the new survey the default, set `DEFAULT_SURVEY_FILE` to its path.
-3. **Check it.** `loki-survey --survey-file src/loki_geometry/data/NEW.txt` prints the checks: parallel tubes, the tube
-   spacing in pitches, the tube ids estimated from the nominal geometry, and the removed end-electronics length per tube.
-   There should be no `WARNING`.
-4. **Calibrate.** `loki-calibrate --survey-file src/loki_geometry/data/NEW.txt --verbose --compare-to-intended --print`
-   (see the steps above for the quality report).
+   To make the new survey the default, set `DEFAULT_SURVEY_FILE = NEW_SURVEY.path` (the tests use the SAM-606 file
+   explicitly, so they are not affected).
+3. **Check it.** `loki-survey --survey-file NEW.txt --verbose` prints the checks: parallel tubes, the tube spacing in
+   pitches, the tube ids estimated from the nominal geometry, and the removed end-electronics length per tube (a packaged
+   file can be given by its name; any other file by its path). There should be no `WARNING`.
+4. **Calibrate.** `loki-calibrate --survey-file NEW.txt --verbose --compare-to-intended --print` (see the steps above for
+   the quality report). The `Warning: Bank … differs from intended …` lines of the calibration are expected: they report
+   the measured deviations of the tilts (> 0.1°) and distances (> 1 mm) from the intended geometry. A `WARNING` of the
+   survey checks (step 3) is not expected.
 5. **Tests.** Add tests for the entry to `tests/test_survey_files.py`; the SAM-606 tests there (label map against the
    nominal tube positions, the fix, the excess lengths) are the template. `test_a_minimal_entry_uses_the_coordinates_as_given`
    and `test_a_new_survey_file_with_its_own_entry` go through these steps with synthetic files.
@@ -225,19 +247,17 @@ loki-verify-json path/to/loki.json --ignore-pixel-shape  # offsets only, without
 ## Other commands
 
 ```
-# Self-test with the intended geometry: the corners must reproduce REFERENCE_BANKS_DATA (within 0.07 mm, the
-# rounding of the CAD values; exit code 1 otherwise). The quality report compares the geometry with itself (0.00).
+# Self-test with the intended geometry: the corners must reproduce REFERENCE_BANKS_DATA (the largest difference is
+# 0.066 mm, the rounding of the CAD values; exit code 1 above 0.1 mm). The quality report compares the geometry with
+# itself (0.00).
 loki-calibrate --data reference --verbose
 
 # Test with the Geant4 geometry: reproduces the Geant4 tilts, section distances and offsets exactly
 loki-calibrate --data example --verbose
 
-# Measured data with another sample-to-window distance
-loki-calibrate --sample-to-window-distance 119 --verbose
-
 # Only the conversion of the survey file (prints the checks and the calibration data)
 loki-survey
-loki-survey --survey-file path/to/NEW.txt   # another survey file (it needs a survey_files entry)
+loki-survey --survey-file NEW.txt --verbose   # another survey file (it needs a survey_files entry), all checks
 
 # Validate the Geant4 port against sb_loki_info values (exit code 1 if it deviates)
 loki-geant4-validate
@@ -258,7 +278,7 @@ from loki_geometry.calibration import Detectors
 from loki_geometry.geant4 import pixel_centre, pixel_id
 
 measured = Detectors(
-    get_measured_calibration_data(sample_to_window_distance=100.0),
+    get_measured_calibration_data(),  # the default survey (SAM-606)
     use_pixel_centre_position=True,
     verbose=True,
 )
@@ -274,13 +294,11 @@ pixels = compute_instrument_pixels(
 
 ## Open points / known issues
 
-- **Sample-to-window distance D:** 119 mm (flange face) or 108 mm (sapphire window) from drawing SI-7615-463, depending on
-  which surface is the survey origin; provisional value 100 mm.
-- **End electronics:** assumed equally long on both ends. This matters for bank 7, where the two measured tubes are shifted
-  2.8 mm relative to each other along the tubes, and which comes out 8 mm off its intended offset.
-- **Bank 0:** not surveyed.
-- **Geant4 geometry** ([G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki)): it uses rounded CAD values, so `REFERENCE_BANKS_DATA` differs slightly from it (up to 0.56 mm and
-  0.05° in bank 8). The geometry building (`pycpp_GeoBCSBanks/geometry_module.cc`) and the pixel position code
+- **Tube end adjustment:** the difference between the measured and the effective tube length is assumed to be split
+  equally between the two ends (step 6). If the end electronics are not equally long on both ends, the bank is shifted
+  along its tubes by half the difference.
+- **Geant4 geometry** ([G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki)): it uses rounded CAD values, so `REFERENCE_BANKS_DATA` differs slightly from it (most in bank 8:
+  corners up to 0.96 mm, front face centre 0.59 mm, bank face 0.05°). The geometry building (`pycpp_GeoBCSBanks/geometry_module.cc`) and the pixel position code
   (`libsrc/AimHelper.cc`) both take all positions from `BcsBanks.cc`, but apply the rotations separately.
 
 ## Development

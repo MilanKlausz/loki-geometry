@@ -30,8 +30,8 @@ the pixel volumes are shifted by half a pixel along the straws.
 Bank 0 (the rear bank) is on the moving detector carriage: its group depends on
 /entry/instrument/detector_carriage/value, and its translation is given as the
 "detector_carriage_zero" dataset of /entry/instrument/detector_carriage/transformations.
-Other children of the groups in the real file (detector_events, NX_class
-attributes of the detector group) are not geometry and stay as they are.
+Other children of the groups in the instrument file (e.g. detector_events)
+are not geometry and are not written.
 
 Output file layout:
   {"info": {...},
@@ -40,7 +40,8 @@ Output file layout:
 (detector_carriage_zero only if bank 0 is written.)
 
 Usage:
-  loki-pixel-json -o loki_detector_pixels.json [--pixels-per-straw 256] [--pixel-reference pixel_base]
+  loki-pixel-json -o loki_detector_pixels.json [--pixels-per-straw 256]
+                  [--pixel-reference pixel_centre|pixel_base] [--banks 1 2 ...] [--decimals 8]
 
 The corners currently come from REFERENCE_BANKS_DATA (the intended geometry).
 """
@@ -62,6 +63,7 @@ from .constants import BANK_IDS, DEFAULT_PIXELS_PER_STRAW, STRAW_RADIUS
 MM_TO_M = 1e-3
 LENGTH_UNIT = "m"
 DEFAULT_DECIMALS = 8  # rounding of the coordinates in [m] (1e-8 m = 10 nm)
+MIN_DECIMALS = 4  # coarsest accepted rounding (1e-4 m = 0.1 mm)
 INSTRUMENT_PATH = "/entry/instrument"
 CARRIAGE_BANK_ID = 0  # the bank on the moving detector carriage
 CARRIAGE_ZERO_NAME = "detector_carriage_zero"
@@ -245,6 +247,13 @@ def reference_corners():
     return dict(REFERENCE_BANKS_DATA)
 
 
+def _decimals(text):
+    value = int(text)
+    if value < MIN_DECIMALS:
+        raise argparse.ArgumentTypeError(f"must be at least {MIN_DECIMALS} (0.1 mm), not {text}")
+    return value
+
+
 def _positive_int(text):
     value = int(text)
     if value < 1:
@@ -259,9 +268,17 @@ def main(argv=None):
     parser.add_argument(
         "-o", "--output", default="loki_detector_pixels.json", help="output JSON file"
     )
-    parser.add_argument("--pixels-per-straw", type=_positive_int, default=DEFAULT_PIXELS_PER_STRAW)
     parser.add_argument(
-        "--decimals", type=int, default=DEFAULT_DECIMALS, help="rounding of the coordinates in [m]"
+        "--pixels-per-straw",
+        type=_positive_int,
+        default=DEFAULT_PIXELS_PER_STRAW,
+        help=f"pixels along each straw (default: {DEFAULT_PIXELS_PER_STRAW})",
+    )
+    parser.add_argument(
+        "--decimals",
+        type=_decimals,
+        default=DEFAULT_DECIMALS,
+        help=f"rounding of the coordinates in [m], at least {MIN_DECIMALS} (default: {DEFAULT_DECIMALS})",
     )
     parser.add_argument(
         "--banks",

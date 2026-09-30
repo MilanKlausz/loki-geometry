@@ -176,23 +176,18 @@ class Detectors:
 
     def print_formatted_data(self):
         """Print the corner data in the REFERENCE_BANKS_DATA format."""
-        bank_data = {}
-        for bank_id, bank_instance in self.banks.items():
-            # Use existing data as template, make a copy to avoid modifying the original
-            bank_output = self._REFERENCE_BANKS_DATA.get(bank_id, {}).copy()
+        corners = {
+            bank_id: {
+                "A": [tuple(float(v) for v in pos) for pos in bank.positionA],
+                "B": [tuple(float(v) for v in pos) for pos in bank.positionB],
+                "num_tubes": c.TUBES_PER_BANK[bank_id],
+            }
+            for bank_id, bank in self.banks.items()
+        }
+        # pprint keeps the tuples and the integer keys
+        pprint.pprint(corners, sort_dicts=False, indent=4)
 
-            # Round coordinates and convert to tuples to match reference formatting
-            bank_output["A"] = [tuple(pos) for pos in bank_instance.positionA]
-            bank_output["B"] = [tuple(pos) for pos in bank_instance.positionB]
-
-            bank_data[bank_id] = bank_output
-
-        formatted_output = {bank_id: bank_data[bank_id] for bank_id in self.BANK_IDS}
-
-        # Use pprint to preserve tuples () and integer keys in the console output
-        pprint.pprint(formatted_output, sort_dicts=False, indent=4)
-
-    # the intended corners (also serving as template for the output)
+    # the intended corners
     _REFERENCE_BANKS_DATA = REFERENCE_BANKS_DATA
 
 

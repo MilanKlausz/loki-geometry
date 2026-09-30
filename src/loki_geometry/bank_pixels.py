@@ -33,9 +33,20 @@ direction. Whether a bank is mirrored is derived from its corners: the layer
 step points towards higher tube ids in mirrored banks, towards lower ones in
 the others. It must agree with MIRRORED_BANK_IDS (checked).
 
-Only A[0], A[1], A[2] and B[0] define the model; the other corners must be
-consistent with it (A[3] = A[1] + A[2] - A[0], B[i] - A[i] = B[0] - A[0])
-within CORNER_TOLERANCE, otherwise a ValueError is raised.
+Only A[0], A[1], A[2] and B[0] define the model. The corners are checked
+(ValueError otherwise):
+  - they are finite numbers;
+  - the other corners are consistent with the model (A[3] = A[1] + A[2] - A[0],
+    B[i] - A[i] = B[0] - A[0]) within CORNER_TOLERANCE;
+  - the tube pitch in a layer (|row_step|) and between the layers
+    (|layer_step|) are the nominal 28.40 / 27.00 mm within PITCH_TOLERANCE
+    (corners of another bank, or of the wrong size, fail this);
+  - the frame (along, row direction, layer direction) is right-handed, as for
+    every correctly ordered bank: swapped 'A' / 'B' (first / last pixel ends)
+    or swapped A[1] / A[2] make it left-handed;
+  - the straw pattern (mirrored or not, see above) matches MIRRORED_BANK_IDS.
+    For corners from calibration.py this always holds (the calibration builds
+    the layer shift from the same list); it guards hand-entered corners.
 
 Bank position (origin of the local offsets): the corner A[0] itself, i.e. the
 FIRST PIXEL END of tube 0 (front layer, top tube, or leftmost tube in vertical
@@ -58,6 +69,7 @@ Units: mm everywhere in this module.
 """
 
 from dataclasses import dataclass
+from numbers import Integral
 
 import numpy as np
 
@@ -71,6 +83,8 @@ from .constants import (
     STRAW_RADIUS,
     STRAW_TABLE_ROTATION_OFFSET,
     STRAWS_PER_TUBE,
+    TUBE_GRID_BASE,
+    TUBE_GRID_SIDE,
     TUBES_PER_BANK,
     TUBES_PER_LAYER,
     UPSIDE_DOWN_BANK_IDS,
@@ -81,6 +95,7 @@ __all__ = [
     "BankPixels",
     "CENTRE_STRAW",
     "CORNER_TOLERANCE",
+    "PITCH_TOLERANCE",
     "DEFAULT_PIXELS_PER_STRAW",
     "FIRST_PIXEL_ID",
     "MIRRORED_BANK_IDS",
@@ -106,6 +121,7 @@ __all__ = [
 FIRST_PIXEL_ID = 1  # detector_number of the first pixel of bank 0 (ICD numbering)
 MIRRORED_BANK_IDS = UPSIDE_DOWN_BANK_IDS  # only used as a cross-check: derived from the corners
 CORNER_TOLERANCE = 0.1  # [mm] accepted inconsistency of the corners (rounding)
+PITCH_TOLERANCE = 0.5  # [mm] accepted deviation of the tube pitches from nominal
 PIXEL_CENTRE = "pixel_centre"  # pixel offsets point to the pixel centres
 PIXEL_BASE = "pixel_base"  # pixel offsets point to the centre of the pixel's first face
 PIXEL_REFERENCES = (PIXEL_CENTRE, PIXEL_BASE)
@@ -175,12 +191,14 @@ class BankFrame:
     @classmethod
     def from_corners(cls, corners, rows, tolerance=CORNER_TOLERANCE):
         """Build the frame from corners in the REFERENCE_BANKS_DATA format.
-        Raises ValueError if the corners do not form a parallelepiped of parallel
-        straws within tolerance [mm] (see the module docstring)."""
+        Raises ValueError if the corners fail the checks of the module docstring
+        (tolerance [mm]: the accepted inconsistency of the corners)."""
         a = np.asarray(corners["A"], dtype=float)
         b = np.asarray(corners["B"], dtype=float)
         if a.shape != (4, 3) or b.shape != (4, 3):
             raise ValueError("corners must contain 4 'A' and 4 'B' points with 3 coordinates each")
+        if not (np.all(np.isfinite(a)) and np.all(np.isfinite(b))):
+            raise ValueError("corners must be finite numbers")
         straw_vector = b[0] - a[0]
         deviation = max(
             np.abs(a[3] - (a[1] + a[2] - a[0])).max(),
@@ -200,6 +218,21 @@ class BankFrame:
             layer_step - np.dot(layer_step, along) * along - np.dot(layer_step, row_axis) * row_axis
         )
         depth_axis = _unit(depth)
+        row_pitch, layer_pitch = np.linalg.norm(row_step), np.linalg.norm(layer_step)
+        if (
+            abs(row_pitch - TUBE_GRID_SIDE) > PITCH_TOLERANCE
+            or abs(layer_pitch - TUBE_GRID_BASE) > PITCH_TOLERANCE
+        ):
+            raise ValueError(
+                f"tube pitches {row_pitch:.2f} mm (in a layer) and {layer_pitch:.2f} mm (between "
+                f"layers) differ from the nominal {TUBE_GRID_SIDE} / {TUBE_GRID_BASE} mm: corners "
+                "of another bank?"
+            )
+        if np.dot(np.cross(along, row_axis), depth_axis) <= 0:
+            raise ValueError(
+                "the corners form a left-handed frame: 'A' and 'B' (first / last pixel ends) "
+                "or A[1] / A[2] (back layer top tube / front layer bottom tube) swapped?"
+            )
         # the layers are shifted towards higher tube ids only in mirrored banks
         mirrored = bool(np.dot(layer_step, row_axis) > 0)
         return cls(
@@ -343,8 +376,14 @@ def compute_bank_pixels(
     pixel_reference=PIXEL_CENTRE,
 ):
     """Pixel data of a bank from its corners (REFERENCE_BANKS_DATA format)."""
-    if int(pixels_per_straw) != pixels_per_straw or pixels_per_straw < 1:
-        raise ValueError(f"pixels_per_straw must be a positive integer, not {pixels_per_straw}")
+    if bank_id not in range(NUMBER_OF_BANKS):
+        raise ValueError(f"unknown bank id {bank_id!r}")
+    if (
+        not isinstance(pixels_per_straw, Integral)
+        or isinstance(pixels_per_straw, bool)
+        or pixels_per_straw < 1
+    ):
+        raise ValueError(f"pixels_per_straw must be a positive integer, not {pixels_per_straw!r}")
     pixels_per_straw = int(pixels_per_straw)
     rows = tubes_per_layer(bank_id)
     if "num_tubes" in corners and corners["num_tubes"] != TUBES_PER_BANK[bank_id]:

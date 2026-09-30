@@ -1,11 +1,21 @@
-"""Tests of the pixel geometry derived from the 8 bank corners."""
+"""Tests of the pixel geometry core (bank_pixels.py): from the 8 corners of a bank
+to the detector numbers and pixel offsets, and the checks of the corners."""
+
+import contextlib
+import io
 
 import numpy as np
 import pytest
 
 from loki_geometry import bank_pixels as lbp
+from loki_geometry import calibration, survey
+from loki_geometry import constants as c
 from loki_geometry import geant4 as g4
-from loki_geometry.reference_data import REFERENCE_BANKS_DATA
+from loki_geometry.reference_data import (
+    REFERENCE_BANKS_DATA,
+    convert_reference_data_to_calibration_data,
+)
+from loki_geometry.survey_files import SAM606
 
 ALL_BANKS = range(lbp.NUMBER_OF_BANKS)
 
@@ -13,9 +23,6 @@ ALL_BANKS = range(lbp.NUMBER_OF_BANKS)
 @pytest.fixture(scope="module")
 def geant4_corners():
     return {bank_id: g4.bank_corners(bank_id) for bank_id in ALL_BANKS}
-
-
-# --- straw pattern ----------------------------------------------------------
 
 
 def test_straw_pattern_is_a_hexagon_around_the_centre_straw():
@@ -35,9 +42,6 @@ def test_straw_offsets_match_geant4(bank_id, geant4_corners):
     assert np.allclose(lbp.straw_offsets(frame), geant4 - geant4[lbp.CENTRE_STRAW], atol=1e-9)
 
 
-# --- bank frame ---------------------------------------------------------------
-
-
 @pytest.mark.parametrize("corner_source", ["reference", "geant4"])
 def test_mirrored_banks_are_derived_from_the_corners(corner_source, geant4_corners):
     corners = REFERENCE_BANKS_DATA if corner_source == "reference" else geant4_corners
@@ -53,17 +57,6 @@ def test_frame_axes_are_orthonormal():
     frame = lbp.BankFrame.from_corners(REFERENCE_BANKS_DATA[5], lbp.tubes_per_layer(5))
     basis = np.array([frame.along, frame.row_axis, frame.depth_axis])
     assert np.allclose(basis @ basis.T, np.eye(3))
-
-
-def test_invalid_corners_raise():
-    with pytest.raises(ValueError):
-        lbp.BankFrame.from_corners({"A": [(0, 0, 0)] * 3, "B": [(1, 0, 0)] * 4}, 16)
-    corners = dict(REFERENCE_BANKS_DATA[1], num_tubes=65)
-    with pytest.raises(ValueError):
-        lbp.compute_bank_pixels(1, corners)
-
-
-# --- offsets ------------------------------------------------------------------
 
 
 def test_tube_order_is_layer_major():
@@ -89,9 +82,6 @@ def test_pixels_are_centred_in_equal_parts_of_the_straw():
     assert np.allclose(distances, frame.straw_length * np.array([0.125, 0.375, 0.625, 0.875]))
 
 
-# --- whole banks ----------------------------------------------------------------
-
-
 @pytest.mark.parametrize("bank_id", ALL_BANKS)
 def test_all_pixels_reproduce_geant4_exactly(bank_id, geant4_corners):
     """With corners taken from the Geant4 geometry, every pixel must agree."""
@@ -110,9 +100,6 @@ def test_reference_corners_are_close_to_geant4():
     for bank_id in ALL_BANKS:
         bank = lbp.compute_bank_pixels(bank_id, REFERENCE_BANKS_DATA[bank_id])
         assert np.abs(bank.positions - g4.bank_pixel_centres(bank_id)).max() < 1.0
-
-
-# --- pixel ids -------------------------------------------------------------------
 
 
 def test_pixel_ids_are_consecutive_over_the_instrument():
@@ -138,9 +125,6 @@ def test_compute_instrument_pixels_returns_all_banks_in_order():
     assert len(pixels[4].offsets) == len(pixels[4].pixel_ids) == 48 * 7 * 2
 
 
-# --- pixel reference point ---------------------------------------------------------
-
-
 def test_pixel_base_offsets_are_half_a_pixel_before_the_centres():
     centre = lbp.compute_bank_pixels(
         7, REFERENCE_BANKS_DATA[7], 4, pixel_reference=lbp.PIXEL_CENTRE
@@ -161,3 +145,265 @@ def test_first_pixel_base_is_the_bank_origin_in_the_centre_straw():
 def test_unknown_pixel_reference_raises():
     with pytest.raises(ValueError):
         lbp.compute_bank_pixels(1, REFERENCE_BANKS_DATA[1], pixel_reference="pixel_top")
+
+
+@pytest.mark.parametrize("n", [1, 3])
+def test_geant4_corners_reproduce_all_banks_pixel_by_pixel(n):
+    """bank_corners -> bank_pixels reproduces every Geant4 pixel centre and id of
+    ALL banks (the existing tests only cover banks 0, 2, 6, 7 with 2 px), including
+    the 1-pixel-per-straw special case of bank_corners."""
+    corners = {b: g4.bank_corners(b, n) for b in c.BANK_IDS}
+    pixels = lbp.compute_instrument_pixels(corners, n, pixel_reference=lbp.PIXEL_CENTRE)
+    for b in c.BANK_IDS:
+        first = g4.bank_pixel_offset(b, n) + 1
+        assert np.array_equal(
+            pixels[b].pixel_ids, np.arange(first, first + len(pixels[b].pixel_ids))
+        )
+        assert np.abs(pixels[b].positions - g4.bank_pixel_centres(b, n)).max() < 1e-6
+
+
+def corner_tube_ids(bank_id):
+    """Tube ids of the corners A[0..3] / B[0..3]: front top, back top, front bottom, back bottom."""
+    rows = lbp.tubes_per_layer(bank_id)
+    return (0, 3 * rows, rows - 1, 4 * rows - 1)
+
+
+@pytest.mark.parametrize("bank_id", ALL_BANKS)
+def test_calibration_data_tubes_are_the_centre_straws_of_the_pixel_model(bank_id):
+    """The two tubes given to the calibration are the tubes with these ids in the pixel model."""
+    bank = lbp.compute_bank_pixels(
+        bank_id, REFERENCE_BANKS_DATA[bank_id], 4, pixel_reference=lbp.PIXEL_BASE
+    )
+    calibration = convert_reference_data_to_calibration_data(
+        {bank_id: REFERENCE_BANKS_DATA[bank_id]}
+    )
+    offsets = bank.positions.reshape(-1, 7, 4, 3)
+    for tube in calibration[0]["positions"]:
+        centre_straw = offsets[tube["tube_id"], lbp.CENTRE_STRAW]
+        assert np.allclose(centre_straw[0], tube["first_pixel_end"], atol=1e-9)
+        last_end = centre_straw[-1] + bank.frame.along * bank.pixel_length
+        assert np.allclose(last_end, tube["last_pixel_end"], atol=1e-9)
+
+
+@pytest.mark.parametrize("bank_id", ALL_BANKS)
+def test_corner_tubes_reproduce_all_eight_corners(bank_id):
+    """Tube id = layer * rows + row: the corner tubes start at A[i] and end at B[i]
+    (also A[3] and B[1..3], which the model does not use)."""
+    n = 4
+    bank = lbp.compute_bank_pixels(
+        bank_id, REFERENCE_BANKS_DATA[bank_id], n, pixel_reference=lbp.PIXEL_BASE
+    )
+    positions = bank.positions.reshape(-1, 7, n, 3)
+    corners = REFERENCE_BANKS_DATA[bank_id]
+    for index, tube in enumerate(corner_tube_ids(bank_id)):
+        centre_straw = positions[tube, lbp.CENTRE_STRAW]
+        assert np.allclose(centre_straw[0], corners["A"][index], atol=0.02)
+        assert np.allclose(
+            centre_straw[-1] + bank.frame.along * bank.pixel_length, corners["B"][index], atol=0.02
+        )
+
+
+@pytest.mark.parametrize("pixels_per_straw", [3, 256, 512])
+def test_pixel_ids_and_offsets_follow_the_icd_formula(pixels_per_straw):
+    """pixel = 1 + pos + (straw_offset[bank] + tube * 7 + straw) * N, and the offset of
+    that pixel is tube + straw + (pos + 0.5) * L / N."""
+    rng = np.random.default_rng(1)
+    straw_offset = 0
+    for bank_id in ALL_BANKS:
+        bank = lbp.compute_bank_pixels(bank_id, REFERENCE_BANKS_DATA[bank_id], pixels_per_straw)
+        tubes = lbp.tube_offsets(bank.frame)
+        straws = lbp.straw_offsets(bank.frame)
+        for _ in range(20):
+            tube = rng.integers(c.TUBES_PER_BANK[bank_id])
+            straw = rng.integers(7)
+            pos = rng.integers(pixels_per_straw)
+            index = (tube * 7 + straw) * pixels_per_straw + pos
+            expected_id = 1 + pos + (straw_offset + tube * 7 + straw) * pixels_per_straw
+            assert bank.pixel_ids[index] == expected_id
+            expected = (
+                tubes[tube] + straws[straw] + bank.frame.along * (pos + 0.5) * bank.pixel_length
+            )
+            assert np.allclose(bank.offsets[index], expected, atol=1e-9)
+        straw_offset += c.TUBES_PER_BANK[bank_id] * 7
+
+
+@pytest.mark.parametrize("normal, mirrored", [(3, 1), (4, 2), (7, 5), (8, 6)])
+def test_upside_down_banks_have_mirrored_straw_patterns(normal, mirrored):
+    """In the (row, depth) frame the straw pattern of an upside down bank is the
+    mirror image (row -> -row) of that of the corresponding normal bank."""
+
+    def pattern(bank_id):
+        frame = lbp.BankFrame.from_corners(
+            REFERENCE_BANKS_DATA[bank_id], lbp.tubes_per_layer(bank_id)
+        )
+        straws = lbp.straw_offsets(frame)
+        return np.column_stack([straws @ frame.row_axis, straws @ frame.depth_axis]), frame
+
+    normal_pattern, normal_frame = pattern(normal)
+    mirrored_pattern, mirrored_frame = pattern(mirrored)
+    assert not normal_frame.mirrored and mirrored_frame.mirrored
+    assert np.allclose(normal_pattern, lbp.STRAW_POSITIONS_PACK_FRAME)
+    assert np.allclose(mirrored_pattern, normal_pattern * [-1, 1])
+    # straws are perpendicular to the straw axis, and on a 7.75 mm hexagon
+    for frame in (normal_frame, mirrored_frame):
+        assert np.allclose(lbp.straw_offsets(frame) @ frame.along, 0.0)
+    assert np.allclose(
+        np.linalg.norm(np.delete(mirrored_pattern, lbp.CENTRE_STRAW, axis=0), axis=1), 7.75
+    )
+
+
+def test_depth_axis_points_away_from_the_sample():
+    """Layer 0 (tube ids 0 .. rows-1) is the front layer, facing the sample."""
+    for bank_id in ALL_BANKS:
+        frame = lbp.BankFrame.from_corners(
+            REFERENCE_BANKS_DATA[bank_id], lbp.tubes_per_layer(bank_id)
+        )
+        front_centre = frame.origin + frame.row_step * (frame.rows - 1) / 2
+        assert np.dot(frame.depth_axis, front_centre) > 0
+        assert np.linalg.norm(front_centre + frame.layer_step) > np.linalg.norm(front_centre)
+
+
+@pytest.mark.parametrize("pixel_reference", lbp.PIXEL_REFERENCES)
+@pytest.mark.parametrize("pixels_per_straw", [1, 3, 256])
+def test_pixel_offsets_cover_the_straw_exactly(pixel_reference, pixels_per_straw):
+    """No half-pixel shift: the pixel centres are symmetric around the straw middle."""
+    bank = lbp.compute_bank_pixels(
+        2, REFERENCE_BANKS_DATA[2], pixels_per_straw, pixel_reference=pixel_reference
+    )
+    along = bank.pixel_centres.reshape(-1, 7, pixels_per_straw, 3) @ bank.frame.along
+    start = (bank.frame.origin + lbp.tube_offsets(bank.frame)) @ bank.frame.along
+    along = along - start[:, None, None]
+    half = bank.pixel_length / 2
+    assert np.allclose(along[..., 0], half)
+    assert np.allclose(along[..., -1], bank.frame.straw_length - half)
+    assert np.allclose(along + along[..., ::-1], bank.frame.straw_length)
+
+
+@pytest.fixture(scope="module", params=[True, False], ids=["pixel_centres", "straw_ends"])
+def measured_corners(request):
+    """Corners calibrated from the package survey (banks 1-8; bank 0 was not measured)."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        data = survey.get_measured_calibration_data(SAM606.path, verbose=False)
+        detectors = calibration.Detectors(data, request.param, run_checks=False)
+    return detectors.formatted_data()
+
+
+def _handedness(frame):
+    return np.linalg.det(np.array([frame.along, frame.row_axis, frame.depth_axis]))
+
+
+def test_measured_corners_pass_the_pixel_model_checks(measured_corners):
+    """The whole survey -> calibration -> pixel chain: the rounded (2 decimals)
+    calibrated corners pass the corner-consistency and mirrored-bank checks, and
+    give the nominal tube grid and straw lengths."""
+    assert sorted(measured_corners) == list(range(1, 9))
+    pixels = lbp.compute_instrument_pixels(measured_corners, 2)
+    for bank_id, bank in pixels.items():
+        frame = bank.frame
+        corners = measured_corners[bank_id]
+        a, b = np.array(corners["A"]), np.array(corners["B"])
+        # rounding to 0.01 mm gives at most ~0.02 mm, well inside CORNER_TOLERANCE
+        assert np.abs(a[3] - (a[1] + a[2] - a[0])).max() <= 0.02 + 1e-9
+        assert np.abs((b - a) - (b[0] - a[0])).max() <= 0.02 + 1e-9
+        assert frame.mirrored == (bank_id in lbp.MIRRORED_BANK_IDS)
+        assert frame.straw_length == pytest.approx(c.STRAW_LENGTHS[bank_id], abs=0.01)
+        assert np.linalg.norm(frame.row_step) == pytest.approx(c.TUBE_GRID_SIDE, abs=0.01)
+        assert np.linalg.norm(frame.layer_step) == pytest.approx(c.TUBE_GRID_BASE, abs=0.01)
+        assert _handedness(frame) == pytest.approx(1.0)
+        assert bank.pixel_ids[0] == lbp.bank_first_pixel_id(bank_id, 2)
+
+
+@pytest.mark.parametrize("source", ["reference", "geant4"])
+def test_bank_frames_are_right_handed(source):
+    """(along, row_axis, depth_axis) is right-handed for every correctly ordered
+    bank (the check behind rejecting swapped corners)."""
+    for bank_id in c.BANK_IDS:
+        corners = (
+            REFERENCE_BANKS_DATA[bank_id] if source == "reference" else g4.bank_corners(bank_id)
+        )
+        frame = lbp.BankFrame.from_corners(corners, lbp.tubes_per_layer(bank_id))
+        assert _handedness(frame) == pytest.approx(1.0)
+
+
+def test_geant4_corners_rounded_like_formatted_data_stay_within_tolerance():
+    """Corners rounded to 0.01 mm (formatted_data default) are accepted for every bank
+    and move the pixels by at most ~0.02 mm."""
+    for bank_id in c.BANK_IDS:
+        exact = g4.bank_corners(bank_id)
+        rounded = {end: [tuple(round(v, 2) for v in p) for p in exact[end]] for end in "AB"}
+        bank = lbp.compute_bank_pixels(bank_id, rounded, 4)
+        assert np.abs(bank.positions - g4.bank_pixel_centres(bank_id, 4)).max() < 0.03
+
+
+def test_invalid_corners_raise():
+    with pytest.raises(ValueError, match="4 'A' and 4 'B' points"):
+        lbp.BankFrame.from_corners({"A": [(0, 0, 0)] * 3, "B": [(1, 0, 0)] * 4}, 16)
+    corners = dict(REFERENCE_BANKS_DATA[1], num_tubes=65)
+    with pytest.raises(ValueError, match="num_tubes 65"):
+        lbp.compute_bank_pixels(1, corners)
+
+
+def _moved_corner(bank_id, end, index, shift_mm):
+    corners = {
+        "A": list(REFERENCE_BANKS_DATA[bank_id]["A"]),
+        "B": list(REFERENCE_BANKS_DATA[bank_id]["B"]),
+    }
+    corners[end][index] = tuple(np.add(corners[end][index], (0.0, 0.0, shift_mm)))
+    return corners
+
+
+@pytest.mark.parametrize("end, index", [("A", 3), ("B", 1), ("B", 2), ("B", 3)])
+def test_inconsistent_corners_are_rejected(end, index):
+    """Only A[0], A[1], A[2] and B[0] define the model; the others must agree."""
+    lbp.compute_bank_pixels(3, _moved_corner(3, end, index, 0.05), 2)  # rounding is fine
+    with pytest.raises(ValueError, match="inconsistent corners"):
+        lbp.compute_bank_pixels(3, _moved_corner(3, end, index, 1.0), 2)
+
+
+def test_corners_of_a_mirrored_bank_for_a_normal_bank_are_rejected():
+    """Corners in the wrong order give the wrong straw pattern: bank 1 (mirrored)
+    corners used for bank 3 (normal) are detected."""
+    corners = dict(REFERENCE_BANKS_DATA[1])
+    corners.pop("num_tubes", None)
+    with pytest.raises(ValueError, match="mirrored"):
+        lbp.compute_bank_pixels(3, corners, 2)
+
+
+@pytest.mark.parametrize("bank_id", [0, 1, 6])
+def test_swapped_pixel_ends_are_rejected(bank_id):
+    corners = REFERENCE_BANKS_DATA[bank_id]
+    with pytest.raises(ValueError):
+        lbp.compute_bank_pixels(bank_id, {"A": corners["B"], "B": corners["A"]}, 2)
+
+
+@pytest.mark.parametrize("bank_id", [0, 3, 5])
+def test_swapped_back_top_and_front_bottom_corners_are_rejected(bank_id):
+    corners = REFERENCE_BANKS_DATA[bank_id]
+    swapped = {end: [corners[end][i] for i in (0, 2, 1, 3)] for end in "AB"}
+    with pytest.raises(ValueError):
+        lbp.compute_bank_pixels(bank_id, swapped, 2)
+
+
+@pytest.mark.parametrize("source, target", [(3, 7), (0, 3), (1, 5)])
+def test_corners_of_another_bank_with_the_same_mirroring_are_rejected(source, target):
+    corners = {end: REFERENCE_BANKS_DATA[source][end] for end in "AB"}
+    with pytest.raises(ValueError):
+        lbp.compute_bank_pixels(target, corners, 2)
+
+
+def test_nan_corner_is_rejected():
+    corners = {end: [list(p) for p in REFERENCE_BANKS_DATA[3][end]] for end in "AB"}
+    corners["A"][0][2] = float("nan")
+    with pytest.raises(ValueError):
+        lbp.compute_bank_pixels(3, corners, 2)
+
+
+def test_negative_bank_id_is_rejected():
+    with pytest.raises((ValueError, IndexError)):
+        lbp.compute_bank_pixels(-1, REFERENCE_BANKS_DATA[8], 2)
+
+
+@pytest.mark.parametrize("pixels_per_straw", [0, -2, 2.5])
+def test_compute_bank_pixels_rejects_invalid_pixels_per_straw(pixels_per_straw):
+    with pytest.raises(ValueError, match="positive integer"):
+        lbp.compute_bank_pixels(3, REFERENCE_BANKS_DATA[3], pixels_per_straw)
