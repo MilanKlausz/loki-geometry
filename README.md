@@ -207,6 +207,7 @@ NeXus-JSON nodes in the structure of `loki.json`:
 loki-pixel-json -o loki_detector_pixels.json               # all banks, 256 pixels per straw
 loki-pixel-json -o test.json --pixels-per-straw 2 --banks 1 2
 loki-pixel-json -o base.json --pixel-reference pixel_base  # offsets to the pixel bases
+loki-pixel-json -o com.json --bank-origin centre_of_mass   # bank positions at the centres of mass
 loki-verify-json loki_detector_pixels.json               # compare with Geant4
 loki-verify-json path/to/loki.json                       # works on the full instrument file too
 loki-verify-json path/to/loki.json --ignore-pixel-shape  # offsets only, without the pixel shape
@@ -216,10 +217,16 @@ loki-verify-json path/to/loki.json --ignore-pixel-shape  # offsets only, without
   (`detector_carriage_zero` only if bank 0 is written).
   Each group holds `detector_number`, `pixel_shape`, `x/y/z_pixel_offset` [m], `transformations` (banks 1–8: one
   translation `trans_<id+1>`; bank 0 has none, see below) and `depends_on`.
-- **Bank position** (the bank translation, the origin of the pixel offsets) = the bank corner `A[0]`: the first pixel end of
-  tube 0 (front layer, top tube; leftmost tube in vertical banks) on the tube axis, as in the current `loki.json`.
-  It is not a pixel position: the first pixel centre is half a pixel further along the straw, and in straw 0 also 7.75 mm to
-  the side.
+- **Bank position** (`--bank-origin`), i.e. the bank translation, the origin of the pixel offsets. The absolute pixel
+  positions are the same for both choices; only their split into translation + offsets differs:
+  - `first_pixel_end` (default): the bank corner `A[0]`, the first pixel end of the centre straw of tube 0 (front layer,
+    top tube; leftmost tube in vertical banks) on the tube axis, as in the current `loki.json`. It is not a pixel
+    position: the first pixel centre of that straw is half a pixel further along it (the other straws of the tube are
+    7.75 mm to the side).
+  - `centre_of_mass`: the mean of all pixel centres of the bank, i.e. the centre of the tube grid, halfway along the
+    straws. It does not depend on the number of pixels per straw.
+
+  `info.bank_origin` in the output records the choice. For bank 0, `detector_carriage_zero` is this position.
 - **Pixel reference point** (`--pixel-reference`), i.e. what the pixel offsets point to:
   - `pixel_centre` (default): the pixel centres. The pixel shape is centred on them.
   - `pixel_base`: the centre of the pixel's first face (the face towards the first pixel end). The pixel shape starts there
@@ -243,6 +250,7 @@ loki-verify-json path/to/loki.json --ignore-pixel-shape  # offsets only, without
   - With 512 pixels per straw, the current `loki.json` offsets are reproduced within 0.011 mm, which is its 5-decimal rounding
     (sample values of `loki.json` hard-coded in the tests); the ids, translations and group structure are the same.
   - Both pixel reference conventions give the same pixel centres, and an inconsistent pixel shape is detected.
+  - Both bank origins give the same absolute pixel positions (also after writing and reading the JSON file).
 
 ## Other commands
 

@@ -48,11 +48,16 @@ Only A[0], A[1], A[2] and B[0] define the model. The corners are checked
     For corners from calibration.py this always holds (the calibration builds
     the layer shift from the same list); it guards hand-entered corners.
 
-Bank position (origin of the local offsets): the corner A[0] itself, i.e. the
-FIRST PIXEL END of tube 0 (front layer, top tube, or leftmost tube in vertical
-banks) on the tube axis. It is not a pixel position: the first pixel centre is
-half a pixel further along the straw, and in straw 0 also 7.75 mm to the side.
-This is the same convention as in the current loki.json.
+Bank position (the bank translation, origin of the local offsets), selectable;
+the absolute pixel positions are the same for both:
+  FIRST_PIXEL_END ("first_pixel_end", default): the corner A[0] itself, i.e.
+      the FIRST PIXEL END of the centre straw of tube 0 (front layer, top tube,
+      or leftmost tube in vertical banks), on the tube axis. It is not a pixel
+      position: the first pixel centre of that straw is half a pixel further
+      along it. This is the same convention as in the current loki.json.
+  CENTRE_OF_MASS ("centre_of_mass"): the mean of all pixel centres of the bank
+      (equal weights), i.e. the centre of the tube grid, halfway along the
+      straws. It does not depend on the number of pixels per straw.
 
 Pixel reference point (what a pixel offset points to), selectable:
   PIXEL_CENTRE ("pixel_centre", default): the centre of the pixel,
@@ -92,11 +97,14 @@ from .constants import (
 
 __all__ = [
     "BankFrame",
+    "BANK_ORIGINS",
     "BankPixels",
+    "CENTRE_OF_MASS",
     "CENTRE_STRAW",
     "CORNER_TOLERANCE",
     "PITCH_TOLERANCE",
     "DEFAULT_PIXELS_PER_STRAW",
+    "FIRST_PIXEL_END",
     "FIRST_PIXEL_ID",
     "MIRRORED_BANK_IDS",
     "NUMBER_OF_BANKS",
@@ -106,6 +114,8 @@ __all__ = [
     "STRAW_POSITIONS_PACK_FRAME",
     "STRAW_RADIUS",
     "bank_first_pixel_id",
+    "bank_origin_position",
+    "centre_of_mass_offset",
     "bank_pixel_ids",
     "compute_bank_pixels",
     "compute_instrument_pixels",
@@ -119,6 +129,9 @@ __all__ = [
 ]
 
 FIRST_PIXEL_ID = 1  # detector_number of the first pixel of bank 0 (ICD numbering)
+FIRST_PIXEL_END = "first_pixel_end"  # bank origin = corner A[0]
+CENTRE_OF_MASS = "centre_of_mass"  # bank origin = mean of the pixel centres
+BANK_ORIGINS = (FIRST_PIXEL_END, CENTRE_OF_MASS)
 MIRRORED_BANK_IDS = UPSIDE_DOWN_BANK_IDS  # only used as a cross-check: derived from the corners
 CORNER_TOLERANCE = 0.1  # [mm] accepted inconsistency of the corners (rounding)
 PITCH_TOLERANCE = 0.5  # [mm] accepted deviation of the tube pitches from nominal
@@ -293,6 +306,29 @@ def pixel_offsets_along_straw(frame, pixels_per_straw, pixel_reference=PIXEL_CEN
     return positions[:, None] * frame.along
 
 
+def centre_of_mass_offset(frame):
+    """Mean of all pixel centres of a bank relative to the frame origin (corner
+    A[0]) [mm]: the mean tube axis position, the mean straw offset (0 up to
+    rounding, the straws are symmetric around the tube axis) and half the straw
+    length. The pixel centres are symmetric along each straw, so the result does
+    not depend on the number of pixels per straw."""
+    return (
+        tube_offsets(frame).mean(axis=0)
+        + straw_offsets(frame).mean(axis=0)
+        + frame.along * frame.straw_length / 2
+    )
+
+
+def bank_origin_position(frame, bank_origin=FIRST_PIXEL_END):
+    """Absolute position of the bank origin (the bank translation) [mm], see the
+    module docstring."""
+    if bank_origin == FIRST_PIXEL_END:
+        return frame.origin
+    if bank_origin == CENTRE_OF_MASS:
+        return frame.origin + centre_of_mass_offset(frame)
+    raise ValueError(f"bank_origin must be one of {BANK_ORIGINS}, not {bank_origin!r}")
+
+
 def local_pixel_offsets(frame, pixels_per_straw, pixel_reference=PIXEL_CENTRE):
     """Offsets of the reference points of all pixels of a bank from its origin
     (corner A[0]), shape (tubes * 7 * N, 3), in pixel id order (tube, straw, pixel)."""
@@ -335,10 +371,10 @@ def bank_pixel_ids(
 
 @dataclass(frozen=True)
 class BankPixels:
-    """Pixel data of one bank: the bank position (the origin of the local
-    offsets = corner A[0], the first pixel end of tube 0 on its axis), the
-    detector numbers and the local offsets of the pixel reference points [mm]
-    (pixel centres or pixel bases, see pixel_reference)."""
+    """Pixel data of one bank: the bank position (translation, the origin of the
+    local offsets, see bank_origin), the detector numbers and the local offsets
+    of the pixel reference points [mm] (pixel centres or pixel bases, see
+    pixel_reference)."""
 
     bank_id: int
     frame: BankFrame
@@ -346,11 +382,12 @@ class BankPixels:
     pixel_ids: np.ndarray
     offsets: np.ndarray
     pixel_reference: str = PIXEL_CENTRE
+    translation: np.ndarray = None  # bank position [mm]; None: corner A[0] (frame.origin)
+    bank_origin: str = FIRST_PIXEL_END
 
-    @property
-    def translation(self):
-        """Bank position = corner A[0] [mm]."""
-        return self.frame.origin
+    def __post_init__(self):
+        if self.translation is None:
+            object.__setattr__(self, "translation", self.frame.origin)
 
     @property
     def pixel_length(self):
@@ -359,7 +396,7 @@ class BankPixels:
     @property
     def positions(self):
         """Absolute positions of the pixel reference points [mm]."""
-        return self.frame.origin + self.offsets
+        return self.translation + self.offsets
 
     @property
     def pixel_centres(self):
@@ -374,8 +411,11 @@ def compute_bank_pixels(
     pixels_per_straw=DEFAULT_PIXELS_PER_STRAW,
     first_pixel_id=FIRST_PIXEL_ID,
     pixel_reference=PIXEL_CENTRE,
+    bank_origin=FIRST_PIXEL_END,
 ):
-    """Pixel data of a bank from its corners (REFERENCE_BANKS_DATA format)."""
+    """Pixel data of a bank from its corners (REFERENCE_BANKS_DATA format).
+    bank_origin: the bank position, FIRST_PIXEL_END (corner A[0]) or
+    CENTRE_OF_MASS (mean of the pixel centres); see the module docstring."""
     if bank_id not in range(NUMBER_OF_BANKS):
         raise ValueError(f"unknown bank id {bank_id!r}")
     if (
@@ -397,13 +437,20 @@ def compute_bank_pixels(
             f"straw pattern, expected {'mirrored' if bank_id in MIRRORED_BANK_IDS else 'normal'} "
             "(corners in the wrong order?)"
         )
+    translation = bank_origin_position(frame, bank_origin)
+    # the offsets from the frame origin (A[0]), moved to the chosen bank origin
+    offsets = local_pixel_offsets(frame, pixels_per_straw, pixel_reference) - (
+        translation - frame.origin
+    )
     return BankPixels(
         bank_id,
         frame,
         pixels_per_straw,
         bank_pixel_ids(bank_id, pixels_per_straw, first_pixel_id),
-        local_pixel_offsets(frame, pixels_per_straw, pixel_reference),
+        offsets,
         pixel_reference,
+        translation,
+        bank_origin,
     )
 
 
@@ -412,11 +459,12 @@ def compute_instrument_pixels(
     pixels_per_straw=DEFAULT_PIXELS_PER_STRAW,
     first_pixel_id=FIRST_PIXEL_ID,
     pixel_reference=PIXEL_CENTRE,
+    bank_origin=FIRST_PIXEL_END,
 ):
     """Pixel data of all banks in corners_by_bank ({bank_id: corners}), as {bank_id: BankPixels}."""
     return {
         bank_id: compute_bank_pixels(
-            bank_id, corners, pixels_per_straw, first_pixel_id, pixel_reference
+            bank_id, corners, pixels_per_straw, first_pixel_id, pixel_reference, bank_origin
         )
         for bank_id, corners in sorted(corners_by_bank.items())
     }

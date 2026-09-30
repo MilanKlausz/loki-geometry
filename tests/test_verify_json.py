@@ -223,3 +223,25 @@ def test_carriage_group_without_transformations_gives_a_clean_error(tmp_path):
 def test_verify_json_cli_reports_a_missing_file_cleanly(tmp_path):
     with pytest.raises(SystemExit):
         vnj.main([str(tmp_path / "missing.json")])
+
+
+@pytest.mark.parametrize("pixel_reference", lbp.PIXEL_REFERENCES)
+def test_both_bank_origins_give_the_same_positions_in_the_json_file(tmp_path, pixel_reference):
+    """Written to a file and read back, both bank origins give the same pixel
+    positions, which agree with Geant4."""
+    corners = {bank_id: g4.bank_corners(bank_id, 2) for bank_id in (0, 2, 5, 8)}
+    positions = {}
+    for origin in lbp.BANK_ORIGINS:
+        pixels = lbp.compute_instrument_pixels(
+            corners, 2, pixel_reference=pixel_reference, bank_origin=origin
+        )
+        filename = tmp_path / f"{origin}.json"
+        lnj.write_json(lnj.build_output(pixels, "geant4"), filename)
+        positions[origin] = vnj.read_pixel_positions(filename)
+        results = vnj.compare_with_geant4(positions[origin], 2)
+        assert max(deviation for deviation, _ in results.values()) < 1e-4
+    for bank_id in corners:
+        ids_a, pos_a = positions[lbp.FIRST_PIXEL_END][bank_id]
+        ids_b, pos_b = positions[lbp.CENTRE_OF_MASS][bank_id]
+        assert np.array_equal(ids_a, ids_b)
+        assert np.allclose(pos_a, pos_b, rtol=0, atol=2e-5)  # 1e-8 m rounding of each part

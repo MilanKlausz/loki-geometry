@@ -534,3 +534,31 @@ def test_main_rejects_too_coarse_decimals(tmp_path, decimals):
     with pytest.raises(SystemExit, match="2"):
         lnj.main(["-o", str(tmp_path / "out.json"), "--banks", "2", "--decimals", decimals])
     assert not (tmp_path / "out.json").exists()
+
+
+def test_main_bank_origin_centre_of_mass(tmp_path):
+    """--bank-origin centre_of_mass: the translations (incl. detector_carriage_zero)
+    are the centres of mass, the offsets are relative to them, the choice is
+    recorded; the default is the first pixel end (corner A[0])."""
+    default = run_main(tmp_path, "--pixels-per-straw", "2", "--banks", "0", "3")
+    assert default["info"]["bank_origin"] == lbp.FIRST_PIXEL_END
+    assert np.allclose(
+        vnj.translation_mm(default[lnj.CARRIAGE_ZERO_NAME]), REFERENCE_BANKS_DATA[0]["A"][0]
+    )
+    data = run_main(
+        tmp_path, "--pixels-per-straw", "2", "--banks", "0", "3", "--bank-origin", "centre_of_mass"
+    )
+    assert data["info"]["bank_origin"] == lbp.CENTRE_OF_MASS
+    assert "centre of mass" in data["info"]["bank_translation"]
+    expected = lbp.compute_instrument_pixels(
+        {b: REFERENCE_BANKS_DATA[b] for b in (0, 3)}, 2, bank_origin=lbp.CENTRE_OF_MASS
+    )
+    assert np.allclose(
+        vnj.translation_mm(data[lnj.CARRIAGE_ZERO_NAME]), expected[0].translation, atol=1e-5
+    )
+    trans_4 = child(child(data["loki_detector_3"], "transformations"), "trans_4")
+    assert np.allclose(vnj.translation_mm(trans_4), expected[3].translation, atol=1e-5)
+    offsets = np.column_stack(
+        [values(child(data["loki_detector_3"], f"{axis}_pixel_offset")) for axis in "xyz"]
+    )
+    assert np.allclose(offsets.mean(axis=0), 0.0, atol=1e-8)  # pixel centre offsets [m]

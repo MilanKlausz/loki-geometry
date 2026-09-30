@@ -12,10 +12,15 @@ its NXdetector group, in the same structure as in loki.json:
   - transformations   one translation from the sample to the bank position [m]
                       (banks 1-8; bank 0 has none, see below)
   - depends_on
-Bank position: the corner A[0] of the bank, i.e. the FIRST PIXEL END of tube 0
-(front layer, top tube, or leftmost tube in vertical banks) on the tube axis,
-as in the current loki.json. It is not a pixel position; the pixel offsets are
-relative to it.
+Bank position (--bank-origin), i.e. the bank translation, to which the pixel
+offsets are relative. The absolute pixel positions are the same for both:
+  first_pixel_end (default): the corner A[0] of the bank, i.e. the FIRST PIXEL
+      END of the centre straw of tube 0 (front layer, top tube, or leftmost tube
+      in vertical banks) on the tube axis, as in the current loki.json. It is
+      not a pixel position: the first pixel centre is half a pixel further along
+      the straw;
+  centre_of_mass: the mean of all pixel centres of the bank (the centre of the
+      tube grid, halfway along the straws; independent of the pixels per straw).
 
 Pixel reference point (--pixel-reference):
   pixel_centre (default): the offsets point to the pixel centres, and the pixel
@@ -41,7 +46,8 @@ Output file layout:
 
 Usage:
   loki-pixel-json -o loki_detector_pixels.json [--pixels-per-straw 256]
-                  [--pixel-reference pixel_centre|pixel_base] [--banks 1 2 ...] [--decimals 8]
+                  [--pixel-reference pixel_centre|pixel_base]
+                  [--bank-origin first_pixel_end|centre_of_mass] [--banks 1 2 ...] [--decimals 8]
 
 The corners currently come from REFERENCE_BANKS_DATA (the intended geometry).
 """
@@ -53,6 +59,9 @@ import sys
 import numpy as np
 
 from .bank_pixels import (
+    BANK_ORIGINS,
+    CENTRE_OF_MASS,
+    FIRST_PIXEL_END,
     PIXEL_CENTRE,
     PIXEL_REFERENCES,
     compute_instrument_pixels,
@@ -68,6 +77,13 @@ INSTRUMENT_PATH = "/entry/instrument"
 CARRIAGE_BANK_ID = 0  # the bank on the moving detector carriage
 CARRIAGE_ZERO_NAME = "detector_carriage_zero"
 CARRIAGE_VALUE_PATH = f"{INSTRUMENT_PATH}/detector_carriage/value"
+# what the bank translation points to, for each bank origin (info of the output)
+BANK_ORIGIN_DESCRIPTIONS = {
+    FIRST_PIXEL_END: "from the sample to corner A[0]: the first pixel end of the centre straw of "
+    "tube 0 (front layer, top/left) on the tube axis",
+    CENTRE_OF_MASS: "from the sample to the centre of mass of the bank: the mean of all its "
+    "pixel centres",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +226,7 @@ def build_output(instrument_pixels, corners_source, decimals=DEFAULT_DECIMALS):
     """The whole output dictionary (see the module docstring)."""
     pixels_per_straw = {bp.pixels_per_straw for bp in instrument_pixels.values()}
     pixel_references = {bp.pixel_reference for bp in instrument_pixels.values()}
+    bank_origins = {bp.bank_origin for bp in instrument_pixels.values()}
     output = {
         "info": {
             "description": "LOKI detector pixel geometry (geometry parts of the loki_detector_<id> groups)",
@@ -221,7 +238,11 @@ def build_output(instrument_pixels, corners_source, decimals=DEFAULT_DECIMALS):
             "pixel_reference": pixel_references.pop()
             if len(pixel_references) == 1
             else sorted(pixel_references),
-            "bank_translation": "from the sample to corner A[0]: the first pixel end of tube 0 (front layer, top/left) on the tube axis",
+            "bank_origin": bank_origins.pop() if len(bank_origins) == 1 else sorted(bank_origins),
+            "bank_translation": "; ".join(
+                BANK_ORIGIN_DESCRIPTIONS[origin]
+                for origin in sorted({bp.bank_origin for bp in instrument_pixels.values()})
+            ),
             "carriage_bank": f"{bank_name(CARRIAGE_BANK_ID)} translation = {CARRIAGE_ZERO_NAME} "
             f"(in {INSTRUMENT_PATH}/detector_carriage/transformations)",
         }
@@ -295,19 +316,32 @@ def main(argv=None):
         help="what the pixel offsets point to: pixel_centre (default) or pixel_base "
         "(centre of the pixel's first face); the pixel shape follows",
     )
+    parser.add_argument(
+        "--bank-origin",
+        choices=BANK_ORIGINS,
+        default=FIRST_PIXEL_END,
+        help="the bank position (the bank translation), to which the pixel offsets are "
+        f"relative: {FIRST_PIXEL_END} (default) = the first pixel end of the centre straw of "
+        f"tube 0; {CENTRE_OF_MASS} = the mean of "
+        "all pixel centres of the bank. The absolute pixel positions are the same for both",
+    )
     args = parser.parse_args(argv)
 
     corners = reference_corners()
     if args.banks is not None:
         corners = {bank_id: corners[bank_id] for bank_id in args.banks}
     instrument_pixels = compute_instrument_pixels(
-        corners, args.pixels_per_straw, pixel_reference=args.pixel_reference
+        corners,
+        args.pixels_per_straw,
+        pixel_reference=args.pixel_reference,
+        bank_origin=args.bank_origin,
     )
     write_json(build_output(instrument_pixels, "REFERENCE_BANKS_DATA", args.decimals), args.output)
     total = sum(len(bp.pixel_ids) for bp in instrument_pixels.values())
     print(
         f"Written {args.output}: {len(instrument_pixels)} banks, {total} pixels, "
-        f"{args.pixels_per_straw} pixels per straw, pixel reference: {args.pixel_reference}"
+        f"{args.pixels_per_straw} pixels per straw, pixel reference: {args.pixel_reference}, "
+        f"bank origin: {args.bank_origin}"
     )
     return 0
 

@@ -407,3 +407,72 @@ def test_negative_bank_id_is_rejected():
 def test_compute_bank_pixels_rejects_invalid_pixels_per_straw(pixels_per_straw):
     with pytest.raises(ValueError, match="positive integer"):
         lbp.compute_bank_pixels(3, REFERENCE_BANKS_DATA[3], pixels_per_straw)
+
+
+# --- bank origin: first pixel end (corner A[0]) or centre of mass -------------------
+
+
+@pytest.mark.parametrize("pixel_reference", lbp.PIXEL_REFERENCES)
+@pytest.mark.parametrize(
+    "bank_ids, pixels_per_straw",
+    [(ALL_BANKS, 3), ((2,), 256)],  # all banks with few pixels, one small bank in full
+    ids=["all-banks-3px", "bank2-256px"],
+)
+def test_both_bank_origins_give_the_same_absolute_positions(
+    bank_ids, pixels_per_straw, pixel_reference
+):
+    """The bank origin only splits the absolute positions differently into
+    translation + offsets: the pixel positions and ids are the same."""
+    for bank_id in bank_ids:
+        pixels = {
+            origin: lbp.compute_bank_pixels(
+                bank_id,
+                REFERENCE_BANKS_DATA[bank_id],
+                pixels_per_straw,
+                pixel_reference=pixel_reference,
+                bank_origin=origin,
+            )
+            for origin in lbp.BANK_ORIGINS
+        }
+        first_end, centre = pixels[lbp.FIRST_PIXEL_END], pixels[lbp.CENTRE_OF_MASS]
+        assert np.allclose(first_end.translation, REFERENCE_BANKS_DATA[bank_id]["A"][0])
+        assert np.linalg.norm(centre.translation - first_end.translation) > 100.0  # really moved
+        assert np.allclose(centre.positions, first_end.positions, rtol=0, atol=1e-9)
+        assert np.allclose(centre.pixel_centres, first_end.pixel_centres, rtol=0, atol=1e-9)
+        assert np.array_equal(centre.pixel_ids, first_end.pixel_ids)
+        assert first_end.bank_origin == lbp.FIRST_PIXEL_END
+        assert centre.bank_origin == lbp.CENTRE_OF_MASS
+
+
+@pytest.mark.parametrize("bank_id", ALL_BANKS)
+def test_centre_of_mass_is_the_mean_of_the_pixel_centres(bank_id):
+    """The translation is the mean of the pixel centres (the mean offset of the
+    pixel centres is zero), whatever the pixel reference and the pixels per straw."""
+    translations = []
+    for pixels_per_straw in (1, 2, 5):
+        for pixel_reference in lbp.PIXEL_REFERENCES:
+            bank = lbp.compute_bank_pixels(
+                bank_id,
+                REFERENCE_BANKS_DATA[bank_id],
+                pixels_per_straw,
+                pixel_reference=pixel_reference,
+                bank_origin=lbp.CENTRE_OF_MASS,
+            )
+            assert np.allclose(bank.translation, bank.pixel_centres.mean(axis=0), atol=1e-9)
+            assert np.allclose((bank.pixel_centres - bank.translation).mean(axis=0), 0, atol=1e-9)
+            translations.append(bank.translation)
+    assert np.allclose(translations, translations[0], rtol=0, atol=1e-9)
+
+
+def test_centre_of_mass_is_the_centre_of_the_tube_grid():
+    """For a regular bank the centre of mass is the midpoint of the 8 corners."""
+    for bank_id in ALL_BANKS:
+        corners = REFERENCE_BANKS_DATA[bank_id]
+        bank = lbp.compute_bank_pixels(bank_id, corners, 2, bank_origin=lbp.CENTRE_OF_MASS)
+        corner_mean = np.mean(np.vstack([corners["A"], corners["B"]]), axis=0)
+        assert np.allclose(bank.translation, corner_mean, atol=0.02)  # corner rounding
+
+
+def test_unknown_bank_origin_raises():
+    with pytest.raises(ValueError, match="bank_origin must be one of"):
+        lbp.compute_bank_pixels(3, REFERENCE_BANKS_DATA[3], 2, bank_origin="bank_centre")
