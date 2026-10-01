@@ -269,8 +269,9 @@ def test_measured_banks_are_on_the_expected_side_of_the_beam():
 def test_measured_front_face_distance_shifts_with_the_sample_to_window_distance(
     measured_detectors, monkeypatch
 ):
-    """The (provisional) distance in the SAM-606 frame shifts every bank along z."""
-    monkeypatch.setattr(survey_files, "SAMPLE_TO_TANK_WINDOW_DISTANCE", 110.0)
+    """The sample-to-window distance of the SAM-606 frame shifts every bank along z."""
+    distance = survey_files.SAMPLE_TO_TANK_WINDOW_DISTANCE
+    monkeypatch.setattr(survey_files, "SAMPLE_TO_TANK_WINDOW_DISTANCE", distance + 10.0)
     shifted = Detectors(
         survey.get_measured_calibration_data(SAM606.path, verbose=False), True, run_checks=False
     )

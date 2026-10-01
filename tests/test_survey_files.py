@@ -119,7 +119,9 @@ def test_calibrate_cli_takes_the_survey_file(tmp_path, capsys):
 def test_tank_window_frame_is_a_proper_rotation_plus_shift():
     origin = sf.tank_window_frame(np.zeros(3))
     assert np.allclose(origin, (0, 0, sf.SAMPLE_TO_TANK_WINDOW_DISTANCE))
-    assert sf.SAMPLE_TO_TANK_WINDOW_DISTANCE == 100.0  # provisional
+    assert (
+        sf.SAMPLE_TO_TANK_WINDOW_DISTANCE == 83.11
+    )  # from the TANK WINDOW and sample poses in TCS
     matrix = np.array(
         [sf.tank_window_frame(e) - origin for e in np.eye(3)]
     ).T  # columns: images of the survey X, Y, Z axes

@@ -81,13 +81,16 @@ def content_checksum(filename):
 # Distance [mm] along the beam from the nominal sample position to the origin
 # of the survey's TANK WINDOW coordinate system (the window is downstream of the
 # sample, so z_sample = X_window + this value).
-# TODO: PROVISIONAL value, to be confirmed. Drawing SI-7615-463 (sheet 2,
-# detail E) gives 119.00 mm from the nominal sample point to the vessel window
-# flange face and 108.0 mm to the sapphire window; which surface is the survey
-# origin is not known yet.
+# From the poses of the TANK WINDOW frame and of the sample in the common TCS
+# frame: TANK WINDOW (9425.77, 21848.983, -400.168), sample (9393.029, 21772.594,
+# -400.181) [mm], both with Euler XYZ (0, 0, 66.8) deg. Same orientation, so the
+# two frames differ by a translation only: the window origin is 83.110 mm from the
+# sample along the beam (X), with -0.001 mm along Y and +0.013 mm along Z
+# (neglected). The window pose reproduces the SAM-606 points of the TCS file from
+# the TANK WINDOW file within their 0.1 mm rounding.
 # It shifts every bank equally along z: it does not change the fit quality
 # numbers or the tilts, only the distances compared with the intended geometry.
-SAMPLE_TO_TANK_WINDOW_DISTANCE = 100.0  # [mm]
+SAMPLE_TO_TANK_WINDOW_DISTANCE = 83.11  # [mm]
 
 
 def tank_window_frame(point):
@@ -98,7 +101,7 @@ def tank_window_frame(point):
     Both frames are right-handed and the axes are just cyclically permuted:
       x_nexus = Y_survey, y_nexus = Z_survey, z_nexus = X_survey
     Then the origin is moved from the window to the sample position, which lies
-    upstream of the window by SAMPLE_TO_TANK_WINDOW_DISTANCE (provisional)."""
+    upstream of the window by SAMPLE_TO_TANK_WINDOW_DISTANCE."""
     X, Y, Z = point
     return np.array([Y, Z, X + SAMPLE_TO_TANK_WINDOW_DISTANCE])
 
@@ -179,7 +182,7 @@ SAM606 = SurveyFile(
     description="SAM-606 survey (2025): both ends of 2 front layer tubes of banks 1-8 "
     "(32 points), on the tube axis at the physical tube ends (including the end electronics), "
     "in the TANK WINDOW coordinate system (sample to window distance "
-    f"{SAMPLE_TO_TANK_WINDOW_DISTANCE} mm, provisional). Bank 0 was not surveyed.",
+    f"{SAMPLE_TO_TANK_WINDOW_DISTANCE} mm). Bank 0 was not surveyed.",
     frame=tank_window_frame,
     label_map=SAM606_LABEL_MAP,
     fixes=(sam606_fix_bank5_mislabelled_tube,),
