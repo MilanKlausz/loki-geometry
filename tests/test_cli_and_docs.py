@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 
+import numpy as np
 import pytest
 
 import loki_geometry
@@ -192,6 +193,32 @@ def test_readme_command_flags_exist(monkeypatch, capsys):
             assert re.search(pattern, help_texts[script]), f"{script} {option}"
 
 
+def test_readme_loki_info_commands_run(monkeypatch, capsys):
+    """Every loki-info example of the README runs (exit code 0) and prints the calibration."""
+    lines = [line for line in readme_commands() if line.split()[0] == "loki-info"]
+    assert len(lines) >= 15
+    for line in lines:
+        code, out = run_entry_point("loki-info", line.split()[1:], monkeypatch, capsys)
+        assert code == 0, line
+        assert "Calibration:" in out or "--list-calibrations" in line, line
+
+
+def test_readme_geometry_info_snippet_runs(tmp_path, monkeypatch, capsys):
+    """The LokiGeometry example of the README runs; it writes the pixel centres of bank 5."""
+    (snippet,) = [block for block in readme_code_blocks("python") if "LokiGeometry" in block]
+    monkeypatch.chdir(tmp_path)
+    namespace = {}
+    exec(compile(snippet, "README.md", "exec"), namespace)
+    out = capsys.readouterr().out
+    assert out.count("largest pixel shift") == 9
+    assert (
+        namespace["pixel_id"] == namespace["geometry"].first_pixel_id(5) + (30 * 7 + 3) * 256 + 10
+    )
+    data = np.loadtxt(tmp_path / "bank5_pixel_centres.txt")
+    assert data.shape == (200704, 4)
+    assert data[0, 0] == 802816 and data[-1, 0] == 802816 + 200704 - 1
+
+
 @pytest.mark.parametrize(
     "args",
     [
@@ -213,6 +240,7 @@ def test_loki_calibrate_reference_self_test_reports_zero_differences(monkeypatch
     code, out = run_entry_point(
         "loki-calibrate", ["--data", "reference", "--verbose"], monkeypatch, capsys
     )
+    assert code == 0
     summary = out.split("Summary (measured - intended")[1]
     rows = [line for line in summary.splitlines() if re.match(r"\s+\d \|", line)]
     assert len(rows) == 9
@@ -234,6 +262,7 @@ def test_loki_nominal_corners(monkeypatch, capsys):
     assert code == 0
     assert out.count("Arrays match within tolerance") == 2 * c.NUMBER_OF_BANKS
     code, out = run_entry_point("loki-nominal-corners", ["3"], monkeypatch, capsys)
+    assert code == 0
     assert out.count("Arrays match within tolerance") == 2
 
 

@@ -8,7 +8,7 @@ import os
 
 import numpy as np
 import pytest
-from test_nexus_json import LOKI_JSON_SAMPLE_OFFSETS_M, LOKI_JSON_TRANSLATIONS
+from loki_json_reference import LOKI_JSON_SAMPLE_OFFSETS_M, LOKI_JSON_TRANSLATIONS
 
 from loki_geometry import bank_pixels as lbp
 from loki_geometry import constants as c
@@ -60,7 +60,7 @@ def test_the_calibrations():
         gi.LokiGeometry("nominal-geometry")
 
 
-@pytest.mark.parametrize("pixels_per_straw", [0, -1, 2.5, "8"])
+@pytest.mark.parametrize("pixels_per_straw", [0, -1, 2.5, "8", True])
 def test_invalid_pixels_per_straw(pixels_per_straw):
     with pytest.raises(ValueError):
         gi.LokiGeometry(pixels_per_straw=pixels_per_straw)
@@ -264,8 +264,7 @@ def test_pixel_ids(pixels_per_straw):
     ]:
         bank_id, tube, straw, k = geometry.decode(pixel)
         assert geometry.pixel_id(bank_id, tube, straw, k) == pixel
-        if n >= 2:
-            assert g4.pixel_id(bank_id, tube, straw, k, n) == pixel  # the Geant4 numbering
+        assert g4.pixel_id(bank_id, tube, straw, k, n) == pixel  # the Geant4 numbering
 
 
 def test_pixel_info(cad):
@@ -373,3 +372,59 @@ def test_cli_errors(argv, message, capsys):
         gi.main(argv)
     assert error.value.code == 2
     assert message in capsys.readouterr().err
+
+
+def test_the_corners_can_not_change_the_package_constants(cad):
+    """The corners of a LokiGeometry are an immutable copy (REFERENCE_BANKS_DATA has lists)."""
+    corners = cad.corners[1]
+    assert corners["A"][0] == tuple(REFERENCE_BANKS_DATA[1]["A"][0])
+    assert corners is not REFERENCE_BANKS_DATA[1]
+    with pytest.raises(TypeError):
+        corners["A"][0] = (0.0, 0.0, 0.0)
+
+
+def test_a_new_survey_calibration_is_available(monkeypatch, tmp_path):
+    """A survey_files entry with a calibration_name is a calibration of the tool (here a copy
+    of the SAM-606 entry under another name: the same geometry)."""
+    import shutil
+
+    from loki_geometry import survey_files as sf
+
+    shutil.copy(sf.SAM606.path, tmp_path / sf.SAM606.file_name)
+    shutil.copy(sf.SAM606.path, tmp_path / "copy.txt")
+    monkeypatch.setattr(sf, "DATA_DIR", str(tmp_path))
+    entry = sf.SurveyFile(
+        "copy.txt",
+        sf.SAM606.label_map,
+        frame=sf.SAM606.frame,
+        fixes=sf.SAM606.fixes,
+        calibration_name="2027-January-test",
+    )
+    monkeypatch.setitem(sf.SURVEY_FILES, entry.file_name, entry)
+    assert "2027-January-test" in gi.available_calibrations()
+    copy = gi.LokiGeometry("2027-January-test", 2)
+    original = gi.LokiGeometry(SAM606, 2)
+    for bank_id in c.BANK_IDS:
+        assert np.array_equal(
+            copy.bank_pixel_centres(bank_id), original.bank_pixel_centres(bank_id)
+        )
+
+
+def test_cli_values(capsys):
+    _, rear = run(["-b", "0", "-r", "10000"], capsys)
+    assert "rear detector distance 10000.0 mm" in rear
+    assert "front face centre F [mm]: (0.000, 0.000, 10000.000)" in rear
+    _, geant4 = run(["-c", "nominal-geant4-geometry"], capsys)
+    assert "Calibration: nominal-geant4-geometry" in geant4
+    assert "(100.000, 727.206, 1154.783)  1368.339" in geant4  # bank 5 in the Geant4 tables
+    _, straw = run(["-n", "4", "-b", "1", "-t", "0", "-s", "3"], capsys)
+    first = 401408 // 256 * 4 + 3 * 4  # bank 1 with 4 pixels per straw, tube 0, straw 3
+    assert f"straw 3: pixel ids {first}..{first + 3}" in straw
+
+
+@pytest.mark.parametrize("number", [0, 1605633])
+def test_cli_detector_number_out_of_range(number, capsys):
+    with pytest.raises(SystemExit) as error:
+        gi.main(["-d", str(number)])
+    assert error.value.code == 2
+    assert "detector number must be in 1 .. 1605632" in capsys.readouterr().err

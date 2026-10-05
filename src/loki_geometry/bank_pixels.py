@@ -40,10 +40,11 @@ Only A[0], A[1], A[2] and B[0] define the model. The corners are checked
     B[i] - A[i] = B[0] - A[0]) within CORNER_TOLERANCE;
   - the tube pitch in a layer (|row_step|) and between the layers
     (|layer_step|) are the nominal 28.40 / 27.00 mm within PITCH_TOLERANCE
-    (corners of another bank, or of the wrong size, fail this);
+    (corners of another bank, of the wrong size, or with A[1] / A[2] swapped
+    fail this);
   - the frame (along, row direction, layer direction) is right-handed, as for
     every correctly ordered bank: swapped 'A' / 'B' (first / last pixel ends)
-    or swapped A[1] / A[2] make it left-handed;
+    make it left-handed;
   - the straw pattern (mirrored or not, see above) matches MIRRORED_BANK_IDS.
     For corners from calibration.py this always holds (the calibration builds
     the layer shift from the same list); it guards hand-entered corners.
@@ -244,7 +245,7 @@ class BankFrame:
         if np.dot(np.cross(along, row_axis), depth_axis) <= 0:
             raise ValueError(
                 "the corners form a left-handed frame: 'A' and 'B' (first / last pixel ends) "
-                "or A[1] / A[2] (back layer top tube / front layer bottom tube) swapped?"
+                "swapped?"
             )
         # the layers are shifted towards higher tube ids only in mirrored banks
         mirrored = bool(np.dot(layer_step, row_axis) > 0)

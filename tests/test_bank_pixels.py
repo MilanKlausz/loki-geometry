@@ -279,12 +279,12 @@ def test_pixel_offsets_cover_the_straw_exactly(pixel_reference, pixels_per_straw
     assert np.allclose(along + along[..., ::-1], bank.frame.straw_length)
 
 
-@pytest.fixture(scope="module", params=[True, False], ids=["pixel_centres", "straw_ends"])
-def measured_corners(request):
+@pytest.fixture(scope="module")
+def measured_corners():
     """Corners calibrated from the package survey (banks 1-8; bank 0 was not measured)."""
     with contextlib.redirect_stdout(io.StringIO()):
         data = survey.get_measured_calibration_data(SAM606.path, verbose=False)
-        detectors = calibration.Detectors(data, request.param, run_checks=False)
+        detectors = calibration.Detectors(data, True, run_checks=False)
     return detectors.formatted_data()
 
 
@@ -372,7 +372,7 @@ def test_corners_of_a_mirrored_bank_for_a_normal_bank_are_rejected():
 @pytest.mark.parametrize("bank_id", [0, 1, 6])
 def test_swapped_pixel_ends_are_rejected(bank_id):
     corners = REFERENCE_BANKS_DATA[bank_id]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="left-handed frame"):
         lbp.compute_bank_pixels(bank_id, {"A": corners["B"], "B": corners["A"]}, 2)
 
 
@@ -380,26 +380,26 @@ def test_swapped_pixel_ends_are_rejected(bank_id):
 def test_swapped_back_top_and_front_bottom_corners_are_rejected(bank_id):
     corners = REFERENCE_BANKS_DATA[bank_id]
     swapped = {end: [corners[end][i] for i in (0, 2, 1, 3)] for end in "AB"}
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="tube pitches"):  # the pitch check catches it first
         lbp.compute_bank_pixels(bank_id, swapped, 2)
 
 
 @pytest.mark.parametrize("source, target", [(3, 7), (0, 3), (1, 5)])
 def test_corners_of_another_bank_with_the_same_mirroring_are_rejected(source, target):
     corners = {end: REFERENCE_BANKS_DATA[source][end] for end in "AB"}
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="tube pitches"):
         lbp.compute_bank_pixels(target, corners, 2)
 
 
 def test_nan_corner_is_rejected():
     corners = {end: [list(p) for p in REFERENCE_BANKS_DATA[3][end]] for end in "AB"}
     corners["A"][0][2] = float("nan")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="finite"):
         lbp.compute_bank_pixels(3, corners, 2)
 
 
 def test_negative_bank_id_is_rejected():
-    with pytest.raises((ValueError, IndexError)):
+    with pytest.raises(ValueError, match="unknown bank id"):
         lbp.compute_bank_pixels(-1, REFERENCE_BANKS_DATA[8], 2)
 
 

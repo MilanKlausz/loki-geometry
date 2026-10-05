@@ -57,10 +57,24 @@ def test_valid_names(name):
     assert gc.file_name_for(name) == f"bank_calibration_{name}.txt"
 
 
-@pytest.mark.parametrize("name", ["", "-a", "a b", "a/b", "a\tb", "ü", None, gc.NOMINAL_NAME])
+@pytest.mark.parametrize(
+    "name", ["", "-a", "a b", "a/b", "a\tb", "ü", None, gc.NOMINAL_NAME, "abc\n", "abc\r", ".a"]
+)
 def test_invalid_names_are_rejected(name):
     with pytest.raises(ValueError):
         gc.check_name(name)
+
+
+def test_the_calibration_names_of_the_survey_files():
+    """Unique, valid, and not one of the two nominal names of the geometry tool."""
+    from loki_geometry import geometry_info as gi
+    from loki_geometry.survey_files import SURVEY_FILES
+
+    names = [entry.calibration_name for entry in SURVEY_FILES.values() if entry.calibration_name]
+    assert len(names) == len(set(names))
+    for name in names:
+        gc.check_name(name)
+        assert name not in (gi.NOMINAL_CAD, gi.NOMINAL_GEANT4)
 
 
 def test_the_sam606_entry_has_its_calibration_name():
@@ -209,6 +223,16 @@ GOOD_BANK = "bank 3 0 -500 2900 1 0 0 0 1 0 0 0 1"
         (["loki_bank_calibration 1", "name x", "bank 3 0 -500 -2900 1 0 0 0 1 0 0 0 1"], "away"),
         (["loki_bank_calibration 1", "name x", "banks 3"], "unknown line"),
         (["loki_bank_calibration 1"], "incomplete"),
+        (["loki_bank_calibration 1", "name nominal-geant4-geometry"], "reserved"),
+        (["loki_bank_calibration 1", "name a/b"], "invalid calibration name"),
+        (
+            ["loki_bank_calibration 1", "name x", "bank x 0 -500 2900 1 0 0 0 1 0 0 0 1"],
+            "f.txt:5: invalid bank id",
+        ),
+        (
+            ["loki_bank_calibration 1", "name x", "bank 3 0 -500 2900 1 0 0 0 1 0 0 a 1"],
+            "f.txt:5: .* must be numbers",
+        ),
     ],
 )
 def test_invalid_files_are_rejected(lines, message, tmp_path):
@@ -295,3 +319,62 @@ def test_cli_errors(args, message, capsys, tmp_path, monkeypatch):
     assert error.value.code == 2
     assert message in capsys.readouterr().err
     assert not (tmp_path / "x.txt").exists()
+
+
+def test_cli_needs_a_name_for_a_survey_without_calibration_name(tmp_path, capsys, monkeypatch):
+    import shutil
+
+    from loki_geometry import survey_files as sf
+
+    shutil.copy(sf.SAM606.path, tmp_path / "noname.txt")
+    entry = sf.SurveyFile(
+        "noname.txt", sf.SAM606.label_map, frame=sf.SAM606.frame, fixes=sf.SAM606.fixes
+    )
+    monkeypatch.setitem(sf.SURVEY_FILES, entry.file_name, entry)
+    with pytest.raises(SystemExit) as error:
+        _quiet(
+            calibration.main,
+            [
+                "--survey-file",
+                str(tmp_path / "noname.txt"),
+                "--geant4-calibration-file",
+                str(tmp_path),
+            ],
+        )
+    assert error.value.code == 2
+    assert "needs --geant4-calibration-name" in capsys.readouterr().err
+    assert not list(tmp_path.glob("bank_calibration_*"))
+
+
+def test_cli_with_an_explicit_name_for_the_survey(tmp_path, capsys):
+    code, out = _calibrate(
+        ["--geant4-calibration-file", str(tmp_path), "--geant4-calibration-name", "my-x"], capsys
+    )
+    assert code == 0
+    path = tmp_path / "bank_calibration_my-x.txt"
+    assert gc.read_calibration_file(path)[0] == "my-x"
+    assert "bank_calibration=<path of the file>" not in out.out  # the file name fits the name
+
+
+def test_cli_reference_data_writes_all_banks_from_the_reference(tmp_path, capsys):
+    """--data reference: all 9 banks from the input itself (no fallback), e.g. to give Geant4
+    the intended (CAD) geometry."""
+    code, _ = _calibrate(
+        [
+            "--data",
+            "reference",
+            "--geant4-calibration-file",
+            str(tmp_path),
+            "--geant4-calibration-name",
+            "nominal-cad-geometry",
+        ],
+        capsys,
+    )
+    assert code == 0
+    path = tmp_path / "bank_calibration_nominal-cad-geometry.txt"
+    name, banks = gc.read_calibration_file(path)
+    assert name == "nominal-cad-geometry" and sorted(banks) == list(range(9))
+    assert "is not in the calibration input" not in path.read_text()
+    reference = _detectors(convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA))
+    for bank_id in range(9):
+        assert np.array_equal(banks[bank_id]["F"], reference.banks[bank_id].front_face_centre)

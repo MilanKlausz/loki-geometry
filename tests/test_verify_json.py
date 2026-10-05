@@ -220,9 +220,11 @@ def test_carriage_group_without_transformations_gives_a_clean_error(tmp_path):
         vnj.read_pixel_positions(_write(tmp_path, data))
 
 
-def test_verify_json_cli_reports_a_missing_file_cleanly(tmp_path):
-    with pytest.raises(SystemExit):
+def test_verify_json_cli_reports_a_missing_file_cleanly(tmp_path, capsys):
+    with pytest.raises(SystemExit) as error:
         vnj.main([str(tmp_path / "missing.json")])
+    assert error.value.code == 2
+    assert "cannot read" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("pixel_reference", lbp.PIXEL_REFERENCES)

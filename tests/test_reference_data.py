@@ -24,7 +24,6 @@ def test_reference_corners_form_a_regular_bank(bank_id):
     assert np.linalg.norm(b[0] - a[0]) == pytest.approx(c.STRAW_LENGTHS[bank_id])
     assert set(REFERENCE_BANKS_DATA[bank_id]) == {"A", "B", "num_tubes"}
     assert REFERENCE_BANKS_DATA[bank_id]["num_tubes"] == c.TUBES_PER_BANK[bank_id]
-    assert REFERENCE_BANKS_DATA[bank_id]["num_tubes"] == c.TUBES_PER_BANK[bank_id]
     frame = lbp.BankFrame.from_corners(REFERENCE_BANKS_DATA[bank_id], lbp.tubes_per_layer(bank_id))
     assert np.linalg.norm(frame.row_step) == pytest.approx(c.TUBE_GRID_SIDE, abs=0.01)
     assert np.linalg.norm(frame.layer_step) == pytest.approx(c.TUBE_GRID_BASE, abs=0.01)

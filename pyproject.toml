@@ -37,7 +37,7 @@ loki_geometry = ["data/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]  # tests: the shared test data modules
 
 [tool.ruff]
 line-length = 100

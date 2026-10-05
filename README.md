@@ -1,10 +1,17 @@
 # loki-geometry – LOKI detector bank geometry
 
-Tools to derive the 8 corner positions of each LOKI detector bank from a survey of the detector tubes
-(e.g. SAM-606), and to turn corner positions into the pixel geometry (bank positions,
-detector numbers and pixel offsets of all 1,605,632 pixels) for the NeXus/JSON instrument file.
+Tools for the geometry of the LOKI detector banks:
+- **Geometry information** (`loki-info`): positions and ids of the banks, tubes, straws and pixels (all 1,605,632 pixels
+  with 256 pixels per straw) for a bank calibration chosen by name: the intended (CAD) geometry, the nominal Geant4
+  geometry or a survey-based calibration (e.g. SAM-606).
+- **Calibration from a survey** (`loki-survey`, `loki-calibrate`): the 8 corner positions of each bank from the
+  surveyed positions of two tubes per bank, with a quality report.
+- **Pixel geometry for the NeXus/JSON instrument file** (`loki-pixel-json`, `loki-verify-json`): bank positions,
+  detector numbers and pixel offsets.
+- **Bank calibration file for the Geant4 geometry** (`loki-calibrate --geant4-calibration-file`).
+
 The pixel positions are checked against the LOKI Geant4 geometry, [G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki),
-through a Python port of its pixel position code (`geant4`).
+through a Python port of its pixel position code (`geant4`) and hard-coded Geant4 values in the tests.
 
 The Python package `loki_geometry` (distribution name `loki-geometry`) needs only Python ≥ 3.9 and numpy.
 The tests need pytest.
@@ -35,6 +42,10 @@ repository root; no installation is needed for that.
   tube surface). The local pixel ids of a straw increase from +x to −x (horizontal banks) and from −y to
   +y (vertical banks), so the first pixel end is the +x / −y end. The same ends are called 'A' / 'B' in
   `REFERENCE_BANKS_DATA`.
+- **Ids:** pixel id = first pixel id of the bank + (tube × 7 + straw) × pixels per straw + pixel in the straw, 0-based
+  as in Geant4 and the analysis programs; the detector number (NeXus `detector_number`, ICD) is pixel id + 1. Tube id =
+  layer × (tubes per layer) + row, layer 0 = the front layer; straw 3 is on the tube axis; pixel 0 is at the first pixel
+  end of the straw.
 - **Corners:** for each bank, 'A' and 'B' each list 4 points: [front layer top tube, back layer top tube,
   front layer bottom tube, back layer bottom tube] ("top/bottom" = lowest/highest tube id).
 - **Bank distance** (drawing SI-7615-463, `BcsBanks.cc` of G4GeoLoki): distance from the sample to the centre of the
@@ -49,7 +60,7 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 
 | Module | What it is |
 | --- | --- |
-| `data/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt` (package data) | SAM-606 survey of the tube ends (the default survey): 32 points (2 tubes × 2 ends for banks 1–8) as `label, X, Y, Z` [mm] in the TANK WINDOW coordinate system (X along the beam, Y left, Z up). The points are on the tube axis at the physical tube ends, including ~15 mm of end electronics on each end. Bank 0 was not surveyed. |
+| `data/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt` (package data) | SAM-606 survey of the tube ends (the default survey): 32 points (2 tubes × 2 ends for banks 1–8) as `label, X, Y, Z` [mm] in the TANK WINDOW coordinate system (X along the beam, Y left, Z up). The points are on the tube axis at the physical tube ends, including the end electronics (the measured tubes are about 30 mm longer than the effective straw length). Bank 0 was not surveyed. |
 | `constants` | The geometry constants shared by all modules (single source): bank layout, straw and tube grid dimensions, nominal bank placement (distances, position and face angles, offsets) and the derived tilt angles. |
 | `survey_files` | What is specific to each known survey file, one `SurveyFile` entry per file: its tube label map (label → bank, tube id), and optionally its coordinate frame, a checksum of its content, fixes (e.g. the SAM-606 bank 5 fix) and notes. Unknown files, and files that do not match their checksum, are rejected. See [A new survey](#a-new-survey). |
 | `survey` (`loki-survey`) | Converts a survey file into calibration data, using the file's `survey_files` entry: fixes, frame conversion, grouping into tubes, sanity checks, trimming of the end electronics. |
@@ -59,7 +70,7 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 | `reference_data` | `REFERENCE_BANKS_DATA`: the intended corner positions (exact CAD values) and a converter to the calibration data format. This is the "intended" geometry of the comparisons. |
 | `geant4_example_data` | Calibration data from the Geant4 geometry (first and last pixel centres of the centre straw of two front-layer tubes per bank, all 9 banks), generated with `geant4`. Used to test the calibration. |
 | `geant4` (`loki-geant4-validate`) | Python port of the Geant4 pixel centre calculation (`AimHelper::getPixelCentreCoordinates` of [G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki)). It matches the C++ code to 1e-12 mm for all pixels (checked once with 1, 2, 3, 7, 256 and 512 pixels per straw), and the Geant4 values hard-coded in `geant4.py` (`sb_loki_info` output, used by `loki-geant4-validate`) and in `tests/test_geant4.py` (`sb_loki_info` and `LokiAimHelper` output) to 1e-6 mm. |
-| `bank_pixels` | Pixel geometry core: from the 8 corners of a bank to the detector numbers and the pixel offsets (pixel centres or bases) of all its pixels (tube grid from vector steps between the corners, straw layout of Geant4, mirrored straw pattern for the upside-down banks 1, 2, 5, 6 derived from the corners). Corners are rejected if they are not finite, not consistent with each other (> 0.1 mm), have other tube pitches than 28.40 / 27.00 mm (> 0.5 mm, e.g. corners of another bank), are in the wrong order (a left-handed frame: first / last pixel ends swapped, or A[1] / A[2] swapped) or give a straw pattern that does not match the bank. |
+| `bank_pixels` | Pixel geometry core: from the 8 corners of a bank to the detector numbers and the pixel offsets (pixel centres or bases) of all its pixels (tube grid from vector steps between the corners, straw layout of Geant4, mirrored straw pattern for the upside-down banks 1, 2, 5, 6 derived from the corners). Corners are rejected if they are not finite, not consistent with each other (> 0.1 mm), have other tube pitches than 28.40 / 27.00 mm (> 0.5 mm, e.g. corners of another bank), are in the wrong order (first / last pixel ends swapped give a left-handed frame, A[1] / A[2] swapped give wrong tube pitches) or give a straw pattern that does not match the bank. |
 | `nexus_json` (`loki-pixel-json`) | Writes the pixel geometry as NeXus-JSON nodes (the geometry parts of the `loki_detector_<id>` groups, plus `detector_carriage_zero` for the rear bank), ready to be copied into the instrument JSON file. Uses `REFERENCE_BANKS_DATA` for now. |
 | `verify_json` (`loki-verify-json`) | Compares the pixel positions of a NeXus-JSON file (the output above, or a full file like `loki.json`) with the Geant4 geometry. Python counterpart of `scripts/verifyJSON` of G4GeoLoki. |
 | `nominal_corners` (`loki-nominal-corners`) | Rebuilds the intended corner positions from the nominal bank distances, angles and offsets, and compares them with `REFERENCE_BANKS_DATA`. |
@@ -88,31 +99,59 @@ The default is the calibration of the default survey file (`DEFAULT_SURVEY_FILE`
 `2026-September-SAM-606`), the same as the default of the Geant4 geometry.
 
 ```
-loki-info                                   # summary of all banks: pixel id ranges, front face centres, distances
-loki-info --list-calibrations
-loki-info -b 5                              # one bank: front face centre, axes u / w / n, corners
-loki-info -c nominal-cad-geometry -b 5      # the same bank in the intended (CAD) geometry
-loki-info -b 2 -t 0                         # a tube: its axis and the 7 straws (ends, pixel ids)
-loki-info -b 2 -t 0 -s 3                    # one straw
-loki-info -p 401408                         # a pixel by its 0-based pixel id (Geant4) ...
-loki-info -d 401409 --unit m --precision 6  # ... or by its detector number (pixel id + 1)
-loki-info -n 512 -r 10000 -p 0              # 512 pixels per straw, rear bank front face at 10 m
+loki-info                                         # summary of all banks: pixel id ranges, front face centres, distances
+loki-info --list-calibrations                     # the calibration names
+loki-info -b 5                                    # one bank: front face centre, axes u / w / n, corners
+loki-info -c nominal-cad-geometry -b 5            # the same bank in the intended (CAD) geometry
+loki-info -c nominal-geant4-geometry              # the summary for the nominal Geant4 geometry
+loki-info -b 2 -t 0                               # a tube: its axis and the 7 straws (ends, pixel ids)
+loki-info -b 5 -t 30                              # tube 30 of bank 5: layer 1, row 2
+loki-info -b 2 -t 0 -s 3                          # one straw
+loki-info -p 401408                               # a pixel by its 0-based pixel id (Geant4) ...
+loki-info -d 401409                               # ... or by its detector number (pixel id + 1)
+loki-info -p 401408 -c nominal-cad-geometry       # the same pixel in the CAD geometry
+loki-info -p 401408 --unit m --precision 6        # positions in m with 6 decimals
+loki-info -n 512 -d 802817                        # 512 pixels per straw (loki.json): the first pixel of bank 1
+loki-info -b 0 -r 10000                           # the rear bank with its front face at 10 m
+loki-info -n 8 -r 4000 -p 0                       # 8 pixels per straw, rear bank at 4 m
 ```
 
-Pixel ids are 0-based as in Geant4 (detector number = pixel id + 1): first pixel id of the bank + (tube × 7 + straw) ×
-pixels per straw + pixel in the straw. The rear bank is placed as in the calibration (CAD: 4999.8 mm); with
+See [Conventions](#conventions) for the ids. The rear bank is placed as in the calibration (CAD: 4999.8 mm); with
 `--rear-detector-distance` it is moved along z so that its front face centre is at that distance (as Geant4 does). The
 pixel geometry is built from the bank corners by `bank_pixels`, so it is the same as in the NeXus-JSON output and as in
 Geant4 for the same calibration (the tests compare it with the Geant4 pixel centres for the nominal and the SAM-606
 placements, and the CAD geometry with `REFERENCE_BANKS_DATA` and `loki.json`). From Python:
 
 ```python
+import numpy as np
+
 from loki_geometry.geometry_info import LokiGeometry
 
-geometry = LokiGeometry("2026-September-SAM-606", pixels_per_straw=256)
-pixel = geometry.pixel(401408)  # ids, centre, straw ends, ...
-bank = geometry.bank(5)  # front_face_centre, along_tubes, across_tubes, layer_normal, distance, ...
-centres = geometry.bank_pixel_centres(5)  # all pixel centres of a bank [mm]
+geometry = LokiGeometry()  # the default calibration, 256 pixels per straw
+pixel = geometry.pixel(401408)  # PixelInfo: ids, centre, straw ends, straw direction, ...
+print(pixel.bank_id, pixel.tube_id, pixel.straw_id, pixel.pixel_in_straw, pixel.centre)
+bank = geometry.bank(
+    5
+)  # BankGeometry: front_face_centre, along_tubes, across_tubes, layer_normal, distance, ...
+first, last = geometry.straw_ends(5, 30, 3)  # the ends of a straw [mm]
+pixel_id = geometry.pixel_id(
+    5, 30, 3, 10
+)  # and back: bank, tube, straw, pixel in the straw -> pixel id
+
+# all pixel centres of a bank, with their pixel ids, to a text file
+centres = geometry.bank_pixel_centres(5)  # shape (pixels, 3) [mm], in pixel id order
+ids = geometry.first_pixel_id(5) + np.arange(len(centres))
+np.savetxt(
+    "bank5_pixel_centres.txt", np.column_stack([ids, centres]), fmt=["%d", "%.4f", "%.4f", "%.4f"]
+)
+
+# how far the survey calibration moves the pixels from the intended (CAD) positions, per bank
+cad = LokiGeometry("nominal-cad-geometry")
+for bank_id in range(9):
+    shifts = np.linalg.norm(
+        geometry.bank_pixel_centres(bank_id) - cad.bank_pixel_centres(bank_id), axis=1
+    )
+    print(f"bank {bank_id}: largest pixel shift {shifts.max():.2f} mm")
 ```
 
 ## From the measured points to the 8 corner positions
@@ -210,6 +249,16 @@ the simulation. Banks that are not in the file keep their nominal Geant4 placeme
 In Geant4 the calibration is selected by name, e.g. `sb_loki_sim bank_calibration=2026-September-SAM-606 …`, after
 rebuilding dgcode (`sb`) so that the new data file is installed; `bank_calibration=<path of a file>` uses a file
 directly. With `--data example` (the Geant4 geometry as input) the file reproduces the nominal Geant4 placement.
+Examples:
+
+```
+loki-calibrate --geant4-calibration-file DGCODE/LOKI/G4GeoLoki/data/      # the default survey (SAM-606)
+loki-calibrate --survey-file NEW.txt --geant4-calibration-file DGCODE/LOKI/G4GeoLoki/data/
+loki-calibrate --data reference --geant4-calibration-file DGCODE/LOKI/G4GeoLoki/data/ --geant4-calibration-name nominal-cad-geometry
+loki-calibrate --geant4-calibration-file my_test.txt --geant4-calibration-name my-test   # bank_calibration=/path/to/my_test.txt
+```
+
+(`DGCODE` = a dgcode_projects checkout. The third one gives Geant4 the intended CAD geometry.)
 
 ## A new survey
 
@@ -356,6 +405,9 @@ loki-geant4-validate
 
 # Rebuild the intended corners from distances / angles / offsets and compare with REFERENCE_BANKS_DATA
 loki-nominal-corners          # all banks, or only some: loki-nominal-corners 1 2
+
+# Geometry information (positions and ids), see "Geometry information" above
+loki-info -p 401408
 
 # Run the tests
 python3 -m pytest

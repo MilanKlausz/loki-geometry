@@ -37,7 +37,7 @@ FILE_SUFFIX = ".txt"
 # the built-in nominal placements of the Geant4 geometry (no file)
 NOMINAL_NAME = "nominal-geant4-geometry"
 BANK_IDS = tuple(range(9))
-_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")  # used with fullmatch
 
 
 def file_name_for(name):
@@ -50,7 +50,7 @@ def check_name(name):
     """A calibration name: letters, digits, '.', '_' and '-' (starting with a
     letter or digit), not the reserved nominal-geant4-geometry (the built-in nominal
     placement of Geant4). Raises ValueError."""
-    if not isinstance(name, str) or not _NAME_PATTERN.match(name):
+    if not isinstance(name, str) or not _NAME_PATTERN.fullmatch(name):
         raise ValueError(
             f"invalid calibration name {name!r}: use letters, digits, '.', '_' and '-' only "
             "(starting with a letter or digit)"
@@ -146,15 +146,25 @@ def read_calibration_file(path):
                 if name is not None or len(words) != 2:
                     fail("invalid or repeated 'name' line")
                 name = words[1]
+                try:
+                    check_name(name)
+                except ValueError as error:
+                    fail(str(error))
             elif words[0] == "bank":
                 if name is None:
                     fail("the 'name' line must come before the bank lines")
                 if len(words) != 14:
                     fail("a bank line needs the bank id and 12 numbers (F, u, w, n)")
-                bank_id = int(words[1])
+                try:
+                    bank_id = int(words[1])
+                except ValueError:
+                    fail(f"invalid bank id {words[1]!r}")
                 if bank_id not in BANK_IDS or bank_id in banks:
                     fail(f"invalid or repeated bank id {bank_id}")
-                values = np.array([float(v) for v in words[2:]])
+                try:
+                    values = np.array([float(v) for v in words[2:]])
+                except ValueError:
+                    fail("the 12 values of a bank line must be numbers")
                 if not np.all(np.isfinite(values)):
                     fail("the numbers must be finite")
                 bank = dict(zip("Fuwn", values.reshape(4, 3)))

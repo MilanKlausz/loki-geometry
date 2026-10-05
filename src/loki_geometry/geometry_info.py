@@ -126,7 +126,16 @@ def calibration_corners(calibration=DEFAULT_CALIBRATION, rear_detector_distance=
         corners.update(_survey_corners(calibration))
     if rear_detector_distance is not None:
         corners[0] = _rear_bank_at(corners[0], rear_detector_distance)
-    return corners
+    return {b: _frozen_corners(corners[b]) for b in c.BANK_IDS}
+
+
+def _frozen_corners(corners):
+    """A copy of bank corners with tuples only (the package constants can not be changed through it)."""
+    return {
+        "A": tuple(tuple(float(v) for v in point) for point in corners["A"]),
+        "B": tuple(tuple(float(v) for v in point) for point in corners["B"]),
+        "num_tubes": corners["num_tubes"],
+    }
 
 
 def _rear_bank_at(corners, distance):
@@ -209,7 +218,11 @@ class LokiGeometry:
         pixels_per_straw=c.DEFAULT_PIXELS_PER_STRAW,
         rear_detector_distance=None,
     ):
-        if not isinstance(pixels_per_straw, (int, np.integer)) or pixels_per_straw < 1:
+        if (
+            not isinstance(pixels_per_straw, (int, np.integer))
+            or isinstance(pixels_per_straw, bool)
+            or pixels_per_straw < 1
+        ):
             raise ValueError(
                 f"pixels_per_straw must be a positive integer, not {pixels_per_straw!r}"
             )
@@ -461,6 +474,13 @@ def main(argv=None):
 
     try:
         if args.pixel is not None or args.detector_number is not None:
+            if (
+                args.detector_number is not None
+                and not 1 <= args.detector_number <= geometry.total_number_of_pixels
+            ):
+                parser.error(
+                    f"detector number must be in 1 .. {geometry.total_number_of_pixels}, not {args.detector_number}"
+                )
             pixel_id = args.pixel if args.pixel is not None else args.detector_number - 1
             p = geometry.pixel(pixel_id)
             print(f"Pixel id {p.pixel_id} (detector number {p.detector_number})")

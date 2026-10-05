@@ -163,7 +163,7 @@ def test_note_when_the_II_point_is_the_first_pixel_end(capsys):
 def test_invalid_label_maps_are_rejected_with_a_value_error(register, tmp_path, change):
     path = _write(tmp_path / "badmap.txt", _nexus_points())
     register(sf.SurveyFile("badmap.txt", {**sf.SAM606.label_map, **change}))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="label map"):
         _quiet(survey.get_measured_calibration_data, str(path), verbose=True)
 
 
@@ -172,7 +172,7 @@ def test_a_tube_with_identical_ends_is_rejected(register, tmp_path):
     points["C2UP3II"] = points["C2UP3I"].copy()  # e.g. a duplicated line in the file
     path = _write(tmp_path / "zero.txt", points)
     register(sf.SurveyFile("zero.txt", sf.SAM606.label_map))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="0.0 mm long"):
         _quiet(survey.get_measured_calibration_data, str(path), verbose=False)
 
 
@@ -248,10 +248,12 @@ def test_survey_is_quiet_without_verbose(capsys):
     assert capsys.readouterr().out == ""
 
 
-def test_survey_cli_reports_a_missing_file_cleanly(tmp_path):
+def test_survey_cli_reports_a_missing_file_cleanly(tmp_path, capsys):
     missing = tmp_path / sf.SAM606_FILE_NAME  # known name, file does not exist
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as error:
         survey.main(["--survey-file", str(missing)])
+    assert error.value.code == 2
+    assert "cannot read" in capsys.readouterr().err
 
 
 def test_without_verbose_only_the_failing_checks_are_printed(register, tmp_path, capsys):

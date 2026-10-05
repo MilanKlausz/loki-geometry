@@ -176,17 +176,16 @@ def test_symmetric_end_errors_do_not_change_the_corners():
         assert np.allclose(_corners(result, bank_id), _corners(reference, bank_id), atol=1e-9)
 
 
-@pytest.mark.parametrize(
-    "data",
-    [
-        example_calibration_data,
-        convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA),
-        _quiet(survey.get_measured_calibration_data, SAM606.path, verbose=False),
-    ],
-    ids=["example", "reference", "measured"],
-)
+_INPUTS = {  # (functions: the survey is read when the test runs, not when it is collected)
+    "example": lambda: example_calibration_data,
+    "reference": lambda: convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA),
+    "measured": lambda: _quiet(survey.get_measured_calibration_data, SAM606.path, verbose=False),
+}
+
+
+@pytest.mark.parametrize("data", list(_INPUTS))
 def test_normal_points_away_from_the_sample_and_the_back_layer_is_behind(data):
-    detectors = _detectors(data)
+    detectors = _detectors(_INPUTS[data]())
     for bank in detectors.banks.values():
         n = bank.vector_perpendicular_layers
         assert np.dot(n, bank.front_face_centre) > 0.9 * np.linalg.norm(bank.front_face_centre)
@@ -394,7 +393,7 @@ def test_more_than_two_input_tubes_give_a_clear_error():
     extra = copy.deepcopy(bank["positions"][0])
     extra["tube_id"] = 7
     bank["positions"].append(extra)
-    with pytest.raises(ValueError, match="2"):
+    with pytest.raises(ValueError, match="exactly 2 input tubes"):
         try:
             _quiet(calibration.Detectors, [bank], True, intended=None, run_checks=False)
         except ValueError as error:
@@ -436,7 +435,7 @@ def test_calibrate_cli_rejects_an_unknown_survey_file_with_exit_code_2(tmp_path,
     assert "unknown survey file 'unknown.txt'" in capsys.readouterr().err
 
 
-def test_calibrate_cli_reports_bad_survey_geometry_as_a_usage_error(register, tmp_path):
+def test_calibrate_cli_reports_bad_survey_geometry_as_a_usage_error(register, tmp_path, capsys):
     """A mirrored frame (determinant -1) flips the layer normal of bank 2:
     loki-calibrate should exit with a message (code 2), not a traceback."""
     path = _write(tmp_path / "mirror.txt", _fixed_sam606_points())
@@ -452,6 +451,7 @@ def test_calibrate_cli_reports_bad_survey_geometry_as_a_usage_error(register, tm
     with pytest.raises(SystemExit) as error:
         _quiet(calibration.main, ["--survey-file", str(path)])
     assert error.value.code == 2
+    assert "normal points towards the sample" in capsys.readouterr().err
 
 
 def test_a_bank_given_twice_is_rejected():
@@ -460,3 +460,45 @@ def test_a_bank_given_twice_is_rejected():
     ]
     with pytest.raises(ValueError, match="bank 1 appears twice"):
         _detectors(data)
+
+
+def test_formatted_data_without_rounding():
+    """decimals=None: the straw ends exactly (positionA / B are pixel centres, half a pixel
+    inside); the default rounds them to 2 decimals."""
+    detectors = _detectors(_INPUTS["measured"]())
+    exact = detectors.formatted_data(decimals=None)
+    rounded = detectors.formatted_data()
+    for bank_id, bank in detectors.banks.items():
+        half = bank.vector_along_tubes * bank.pixel_size / 2
+        assert np.array_equal(np.array(exact[bank_id]["A"]), bank.positionA + half)
+        assert np.array_equal(np.array(exact[bank_id]["B"]), bank.positionB - half)
+        for key in "AB":
+            assert rounded[bank_id][key] == [
+                tuple(round(v, 2) for v in p) for p in exact[bank_id][key]
+            ]
+
+
+def test_the_checks_warn_about_a_moved_and_tilted_bank(capsys):
+    """The tilt and distance checks against the intended geometry print warnings for a bank
+    that is moved by 10 mm along the beam and tilted (the unchanged banks pass)."""
+    data = copy.deepcopy(convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA))
+    bank = next(b for b in data if b["bank_id"] == 3)
+    keys = ("first_pixel_end", "last_pixel_end")
+    y_centre = np.mean([p[k][1] for p in bank["positions"] for k in keys])
+    for position in bank["positions"]:
+        for key in keys:
+            point = np.array(position[key], dtype=float)
+            point[2] += 10.0 + 0.01 * (point[1] - y_centre)  # 10 mm farther, tilted by ~0.6 deg
+            position[key] = tuple(point)
+    calibration.Detectors(data, True)
+    out = capsys.readouterr().out
+    assert "Warning: Bank 3" in out and "tilt" in out.lower()
+    assert "sample bank distance" in out
+    assert all(f"Warning: Bank {b} " not in out for b in (0, 1, 2, 4, 5, 6, 7, 8))
+
+
+def test_calibrate_cli_reports_a_missing_survey_file(tmp_path, capsys):
+    with pytest.raises(SystemExit) as error:
+        _quiet(calibration.main, ["--survey-file", str(tmp_path / sf.SAM606_FILE_NAME)])
+    assert error.value.code == 2
+    assert "cannot read" in capsys.readouterr().err

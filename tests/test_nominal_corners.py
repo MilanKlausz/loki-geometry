@@ -31,7 +31,9 @@ def test_nominal_corners_match_geant4(bank_id):
 
 def test_nominal_corners_print_formatted_data_prints_plain_floats(capsys):
     nominal_corners.Detectors().print_formatted_data()
-    assert "np.float64" not in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "np.float64" not in out
+    assert out.count("'A': [") == 9 and out.count("'B': [") == 9
 
 
 def test_nominal_corners_cli_honours_several_bank_ids(capsys):
