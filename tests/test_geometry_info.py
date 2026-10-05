@@ -4,6 +4,8 @@ REFERENCE_BANKS_DATA and loki.json (nominal-cad-geometry), the Geant4 model
 (nominal-geant4-geometry, the Python port and sb_loki_info values) and the Geant4
 geometry with the SAM-606 bank calibration (hard-coded values of G4GeoLoki)."""
 
+import os
+
 import numpy as np
 import pytest
 from test_nexus_json import LOKI_JSON_SAMPLE_OFFSETS_M, LOKI_JSON_TRANSLATIONS
@@ -13,6 +15,7 @@ from loki_geometry import constants as c
 from loki_geometry import geant4 as g4
 from loki_geometry import geometry_info as gi
 from loki_geometry.reference_data import REFERENCE_BANKS_DATA
+from loki_geometry.survey_files import DEFAULT_SURVEY_FILE, SURVEY_FILES
 
 SAM606 = "2026-September-SAM-606"
 CORNER_TUBES = ("front top", "back top", "front bottom", "back bottom")
@@ -20,7 +23,7 @@ CORNER_TUBES = ("front top", "back top", "front bottom", "back bottom")
 
 @pytest.fixture(scope="module")
 def cad():
-    return gi.LokiGeometry()
+    return gi.LokiGeometry(gi.NOMINAL_CAD)
 
 
 @pytest.fixture(scope="module")
@@ -45,8 +48,14 @@ def test_the_calibrations():
     names = gi.available_calibrations()
     assert list(names)[:2] == ["nominal-cad-geometry", "nominal-geant4-geometry"]
     assert SAM606 in names
-    assert gi.DEFAULT_CALIBRATION == "nominal-cad-geometry"
-    assert gi.LokiGeometry().calibration == "nominal-cad-geometry"
+    # the default: the calibration of the default survey file (as the default of Geant4)
+    assert gi.DEFAULT_CALIBRATION == SAM606
+    assert SURVEY_FILES[os.path.basename(DEFAULT_SURVEY_FILE)].calibration_name == SAM606
+    default = gi.LokiGeometry()
+    assert default.calibration == SAM606
+    assert np.array_equal(
+        default.bank_pixel_centres(5), gi.LokiGeometry(SAM606).bank_pixel_centres(5)
+    )
     with pytest.raises(ValueError, match="unknown calibration"):
         gi.LokiGeometry("nominal-geometry")
 
@@ -306,17 +315,20 @@ def run(argv, capsys):
 def test_cli_summary(capsys):
     code, out = run([], capsys)
     assert code == 0
-    assert "Calibration: nominal-cad-geometry, 256 pixels per straw" in out
-    assert "(100.000, 727.187, 1154.532)  1368.118" in out  # bank 5
+    assert f"Calibration: {SAM606}, 256 pixels per straw" in out  # the default
+    assert "(102.047, 723.057, 1141.389)  1354.988" in out  # bank 5
     assert "-0.000" not in out
+    _, cad = run(["-c", "nominal-cad-geometry"], capsys)
+    assert "Calibration: nominal-cad-geometry, 256 pixels per straw" in cad
+    assert "(100.000, 727.187, 1154.532)  1368.118" in cad
 
 
 def test_cli_list_calibrations(capsys):
     code, out = run(["--list-calibrations"], capsys)
     assert (
-        "nominal-cad-geometry (default)" in out
-        and "nominal-geant4-geometry" in out
-        and SAM606 in out
+        f"{SAM606} (default)" in out
+        and "nominal-cad-geometry:" in out
+        and "nominal-geant4-geometry:" in out
     )
 
 
@@ -326,7 +338,9 @@ def test_cli_pixel_and_detector_number(capsys):
     assert by_id == by_number
     assert "Pixel id 401408 (detector number 401409)" in by_id
     assert "bank 1, tube 0 (layer 0, row 0), straw 0, pixel 0 in the straw" in by_id
-    _, in_m = run(["-p", "0", "--unit", "m", "--precision", "6"], capsys)
+    _, in_m = run(
+        ["-c", "nominal-cad-geometry", "-p", "0", "--unit", "m", "--precision", "6"], capsys
+    )
     assert "centre [m]: (0.498047, 0.779861, 5.004834)" in in_m
 
 

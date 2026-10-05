@@ -11,7 +11,7 @@ Without a query it prints a summary of all banks.
 
 Calibrations (by name, see available_calibrations())
 -----------------------------------------------------
-  nominal-cad-geometry     (default) the intended geometry: the corners of
+  nominal-cad-geometry     the intended geometry: the corners of
                            REFERENCE_BANKS_DATA (exact CAD values)
   nominal-geant4-geometry  the nominal geometry of the Geant4 model (G4GeoLoki,
                            https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki,
@@ -24,6 +24,9 @@ Calibrations (by name, see available_calibrations())
                            Banks that are not in the survey are taken from
                            nominal-cad-geometry (as in the Geant4 calibration file
                            written by loki-calibrate).
+The default is the calibration of the default survey file (DEFAULT_SURVEY_FILE of
+survey_files.py: 2026-September-SAM-606), the same as the default of the Geant4
+geometry.
 
 Model and conventions
 ---------------------
@@ -54,6 +57,7 @@ normal, away from the sample), as in the Geant4 calibration file.
 import argparse
 import contextlib
 import io
+import os
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -64,10 +68,14 @@ from . import bank_pixels as lbp
 from . import constants as c
 from . import geant4
 from .geant4_calibration import NOMINAL_NAME as _GEANT4_NOMINAL_NAME
+from .survey_files import DEFAULT_SURVEY_FILE, SURVEY_FILES
 
 NOMINAL_CAD = "nominal-cad-geometry"
 NOMINAL_GEANT4 = _GEANT4_NOMINAL_NAME  # "nominal-geant4-geometry", the same name as in Geant4
-DEFAULT_CALIBRATION = NOMINAL_CAD
+# the calibration of the default survey file (2026-September-SAM-606)
+DEFAULT_CALIBRATION = (
+    SURVEY_FILES[os.path.basename(DEFAULT_SURVEY_FILE)].calibration_name or NOMINAL_CAD
+)
 
 
 def available_calibrations():

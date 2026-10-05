@@ -80,14 +80,18 @@ pixels for a bank calibration, selected by name:
 
 | Calibration | What it is |
 | --- | --- |
-| `nominal-cad-geometry` (default) | The intended geometry: the corners of `REFERENCE_BANKS_DATA` (exact CAD values). |
+| `nominal-cad-geometry` | The intended geometry: the corners of `REFERENCE_BANKS_DATA` (exact CAD values). |
 | `nominal-geant4-geometry` | The nominal geometry of the Geant4 model (its built-in tables, via `geant4`); in Geant4 `bank_calibration=nominal-geant4-geometry`. It differs from the CAD values by up to ~1 mm. |
 | a survey calibration | The `calibration_name` of a `survey_files` entry (e.g. `2026-September-SAM-606`); banks that are not in the survey are taken from `nominal-cad-geometry`. |
+
+The default is the calibration of the default survey file (`DEFAULT_SURVEY_FILE` in `survey_files`, currently
+`2026-September-SAM-606`), the same as the default of the Geant4 geometry.
 
 ```
 loki-info                                   # summary of all banks: pixel id ranges, front face centres, distances
 loki-info --list-calibrations
-loki-info -c 2026-September-SAM-606 -b 5    # one bank: front face centre, axes u / w / n, corners
+loki-info -b 5                              # one bank: front face centre, axes u / w / n, corners
+loki-info -c nominal-cad-geometry -b 5      # the same bank in the intended (CAD) geometry
 loki-info -b 2 -t 0                         # a tube: its axis and the 7 straws (ends, pixel ids)
 loki-info -b 2 -t 0 -s 3                    # one straw
 loki-info -p 401408                         # a pixel by its 0-based pixel id (Geant4) ...
