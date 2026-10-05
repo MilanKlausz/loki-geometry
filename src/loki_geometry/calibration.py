@@ -7,6 +7,7 @@ Usage
 -----
   loki-calibrate [--data measured|reference|example] [--survey-file FILE]
                  [--verbose] [--compare-to-intended] [--print]
+                 [--geant4-calibration-file PATH [--geant4-calibration-name NAME]]
   --data measured   a survey file, via survey.py (default; the SAM-606 survey
                     unless --survey-file is given)
   --data reference  the intended geometry (REFERENCE_BANKS_DATA) -> must
@@ -16,6 +17,16 @@ Usage
   --verbose         print the quality report (see Detectors.print_quality_report)
   --compare-to-intended  print the corner shifts from the intended banks
   --print           print the corners (straw ends) in the REFERENCE_BANKS_DATA format
+  --geant4-calibration-file PATH  write the bank calibration file of the Geant4
+                    geometry (see geant4_calibration.py) to PATH; if PATH is a
+                    directory (e.g. G4GeoLoki/data of dgcode_projects), the
+                    file bank_calibration_<NAME>.txt is written in it; all 9
+                    banks, those missing from the input (e.g. bank 0 of
+                    SAM-606) from REFERENCE_BANKS_DATA
+  --geant4-calibration-name NAME  the calibration name (the bank_calibration
+                    value of the Geant4 geometry); default: the calibration_name
+                    of the survey file entry (survey_files.py), required for
+                    --data reference / example
 The "intended" geometry = the banks built from REFERENCE_BANKS_DATA (exact CAD
 values, also used by nexus_json.py). The nominal Geant4 table values in
 Detectors (tilt angles, distances) are rounded CAD values; they are printed
@@ -86,11 +97,14 @@ Then Detectors checks the orthogonality of the basis, the tilt angles and the
 sample-bank distances against the intended values.
 """
 
+import os
 import pprint
 import sys
+import textwrap
 
 import numpy as np
 
+from . import __version__, geant4_calibration
 from . import constants as c
 from .geant4_example_data import example_calibration_data
 from .reference_data import REFERENCE_BANKS_DATA, convert_reference_data_to_calibration_data
@@ -777,16 +791,36 @@ def main(argv=None):
         action="store_true",
         help="print the corner data (straw ends) in the REFERENCE_BANKS_DATA format",
     )
+    parser.add_argument(
+        "--geant4-calibration-file",
+        metavar="PATH",
+        default=None,
+        help="write the bank calibration file of the Geant4 geometry (G4GeoLoki) to PATH; if PATH "
+        "is a directory (e.g. LOKI/G4GeoLoki/data of dgcode_projects), the file "
+        "bank_calibration_<NAME>.txt is written in it",
+    )
+    parser.add_argument(
+        "--geant4-calibration-name",
+        metavar="NAME",
+        default=None,
+        help="name of the calibration (the bank_calibration value of the Geant4 geometry); default: "
+        "the calibration_name of the survey file entry in survey_files.py",
+    )
     args = parser.parse_args(argv)
     if args.survey_file is not None and args.data != "measured":
         parser.error("--survey-file only applies to --data measured")
+    if args.geant4_calibration_name is not None and args.geant4_calibration_file is None:
+        parser.error("--geant4-calibration-name needs --geant4-calibration-file")
 
+    calibration_name = args.geant4_calibration_name
     if args.data == "reference":
         print("Using the intended geometry (REFERENCE_BANKS_DATA) as calibration data")
         calibration_data = convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA)
+        provenance = ["Input: the intended geometry (REFERENCE_BANKS_DATA of loki-geometry)."]
     elif args.data == "example":
         print("Using example calibration data from Geant4 model")
         calibration_data = example_calibration_data
+        provenance = ["Input: the Geant4 example data (geant4_example_data.py of loki-geometry)."]
     else:
         from .survey import get_measured_calibration_data
         from .survey_files import DEFAULT_SURVEY_FILE
@@ -798,6 +832,27 @@ def main(argv=None):
             calibration_data = get_measured_calibration_data(survey_file, verbose=args.verbose)
         except OSError as error:
             parser.error(f"cannot read {survey_file}: {error.strerror or error}")
+        except ValueError as error:
+            parser.error(str(error))
+        from .survey_files import SURVEY_FILES
+
+        entry = SURVEY_FILES[os.path.basename(os.fspath(survey_file))]
+        if calibration_name is None:
+            calibration_name = entry.calibration_name
+        provenance = [f"Input: the survey file {entry.file_name}"]
+        if entry.checksum is not None:
+            provenance.append(f"  (content SHA-256 {entry.checksum})")
+        if entry.description:
+            provenance += textwrap.wrap(entry.description, 88)
+
+    if args.geant4_calibration_file is not None:
+        if calibration_name is None:
+            parser.error(
+                "--geant4-calibration-file needs --geant4-calibration-name (no default name for "
+                "this input)"
+            )
+        try:
+            geant4_calibration.check_name(calibration_name)
         except ValueError as error:
             parser.error(str(error))
 
@@ -813,6 +868,31 @@ def main(argv=None):
 
     if args.print_data:
         detectors.print_formatted_data()
+
+    if args.geant4_calibration_file is not None:
+        comments = [f"Written by loki-geometry {__version__} (loki-calibrate --data {args.data})."]
+        comments += provenance
+        try:
+            # banks missing from the input (e.g. bank 0 of SAM-606): the intended geometry
+            path = geant4_calibration.write_calibration_file(
+                detectors,
+                args.geant4_calibration_file,
+                calibration_name,
+                comments,
+                fallback=detectors.intended,
+                fallback_label="REFERENCE_BANKS_DATA (the intended geometry)",
+            )
+        except OSError as error:
+            parser.error(f"cannot write {args.geant4_calibration_file}: {error.strerror or error}")
+        except ValueError as error:
+            parser.error(str(error))
+        print(f"\nGeant4 bank calibration '{calibration_name}' written to {path}")
+        if path.name != geant4_calibration.file_name_for(calibration_name):
+            print(
+                f"  (to select it by name, the file must be G4GeoLoki/data/"
+                f"{geant4_calibration.file_name_for(calibration_name)}; otherwise use "
+                f"bank_calibration=<path of the file>)"
+            )
 
     if args.data == "reference":
         # self test: the corners must reproduce REFERENCE_BANKS_DATA (the

@@ -31,6 +31,9 @@ An entry (SurveyFile), only file_name and label_map are required:
   fixes         optional: functions (points, verbose) -> points, applied in order
                 to the points (in the file's frame) right after reading them
   bank_notes    optional: {bank_id: note} printed with the checks of that bank
+  calibration_name  optional: the name of the bank calibration made from this
+                file, the default name of the Geant4 calibration file written by
+                loki-calibrate --geant4-calibration-file (see geant4_calibration.py)
 """
 
 import hashlib
@@ -57,6 +60,7 @@ class SurveyFile:
     description: str = ""
     fixes: tuple[Callable, ...] = ()
     bank_notes: dict[int, str] = field(default_factory=dict)
+    calibration_name: Optional[str] = None  # default Geant4 calibration name
 
     @property
     def path(self):
@@ -107,7 +111,7 @@ def tank_window_frame(point):
 
 
 # ---------------------------------------------------------------------------
-# SAM-606 (2025): tube ends of banks 1-8 in the TANK WINDOW coordinate system
+# SAM-606 (2026): tube ends of banks 1-8 in the TANK WINDOW coordinate system
 # ---------------------------------------------------------------------------
 
 SAM606_FILE_NAME = "ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt"
@@ -179,7 +183,7 @@ def sam606_fix_bank5_mislabelled_tube(points, verbose=True):
 SAM606 = SurveyFile(
     file_name=SAM606_FILE_NAME,
     checksum="7195877da8cbc18f846a9ef1b381696b7c51bc6f2a334c75ef203f1d051c2202",
-    description="SAM-606 survey (2025): both ends of 2 front layer tubes of banks 1-8 "
+    description="SAM-606 survey (2026): both ends of 2 front layer tubes of banks 1-8 "
     "(32 points), on the tube axis at the physical tube ends (including the end electronics), "
     "in the TANK WINDOW coordinate system (sample to window distance "
     f"{SAMPLE_TO_TANK_WINDOW_DISTANCE} mm). Bank 0 was not surveyed.",
@@ -187,6 +191,7 @@ SAM606 = SurveyFile(
     label_map=SAM606_LABEL_MAP,
     fixes=(sam606_fix_bank5_mislabelled_tube,),
     bank_notes={5: "tube UP9 constructed parallel to UP3 (bank 5 fix)"},
+    calibration_name="2026-September-SAM-606",
 )
 
 # ---------------------------------------------------------------------------

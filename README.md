@@ -54,6 +54,7 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 | `survey_files` | What is specific to each known survey file, one `SurveyFile` entry per file: its tube label map (label → bank, tube id), and optionally its coordinate frame, a checksum of its content, fixes (e.g. the SAM-606 bank 5 fix) and notes. Unknown files, and files that do not match their checksum, are rejected. See [A new survey](#a-new-survey). |
 | `survey` (`loki-survey`) | Converts a survey file into calibration data, using the file's `survey_files` entry: fixes, frame conversion, grouping into tubes, sanity checks, trimming of the end electronics. |
 | `calibration` (`loki-calibrate`) | The calibration: calibration data → 8 corner positions per bank, quality report, comparison with the intended geometry, output in the `REFERENCE_BANKS_DATA` format. |
+| `geant4_calibration` | Writes (and reads) the bank calibration file of the Geant4 geometry: per bank the front face centre and the three bank axes, selected in Geant4 with the geometry parameter `bank_calibration`. See [Bank calibration for the Geant4 geometry](#bank-calibration-for-the-geant4-geometry). |
 | `reference_data` | `REFERENCE_BANKS_DATA`: the intended corner positions (exact CAD values) and a converter to the calibration data format. This is the "intended" geometry of the comparisons. |
 | `geant4_example_data` | Calibration data from the Geant4 geometry (first and last pixel centres of the centre straw of two front-layer tubes per bank, all 9 banks), generated with `geant4`. Used to test the calibration. |
 | `geant4` (`loki-geant4-validate`) | Python port of the Geant4 pixel centre calculation (`AimHelper::getPixelCentreCoordinates` of [G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki)). It matches the C++ code to 1e-12 mm for all pixels (checked once with 1, 2, 3, 7, 256 and 512 pixels per straw), and the Geant4 values hard-coded in `geant4.py` (`sb_loki_info` output, used by `loki-geant4-validate`) and in `tests/test_geant4.py` (`sb_loki_info` and `LokiAimHelper` output) to 1e-6 mm. |
@@ -132,6 +133,40 @@ Steps 1–4 use the file's entry in `survey_files` (here `SAM606`):
    the input of `bank_pixels` / `nexus_json`. Only the banks in the survey are in the output (e.g. SAM-606 has no
    bank 0); take the others from `REFERENCE_BANKS_DATA`. (Feeding the measured corners into `loki-pixel-json` is not
    wired up yet.)
+10. **Geant4 calibration file** (`--geant4-calibration-file`), see the next section.
+
+## Bank calibration for the Geant4 geometry
+
+The Geant4 geometry ([G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki)) can place
+the banks from a calibration instead of its nominal values. It reads one file per calibration, which `loki-calibrate`
+writes:
+
+```
+loki-calibrate --geant4-calibration-file PATH [--geant4-calibration-name NAME]
+```
+
+- `PATH` is a file, or a directory: then the file `bank_calibration_<NAME>.txt` is written in it. Giving the data
+  directory of G4GeoLoki in a dgcode_projects checkout (`LOKI/G4GeoLoki/data/`) puts it where Geant4 looks for it.
+- `NAME` is the name of the calibration, i.e. the value of the Geant4 geometry parameter `bank_calibration`
+  (letters, digits, `.`, `_`, `-`; `nominal-geometry` is reserved for the built-in nominal placement). The default is
+  the `calibration_name` of the survey file's entry in `survey_files` (`2026-September-SAM-606` for SAM-606). It is
+  required for `--data reference` and `--data example`, which have no entry.
+- The other options work as usual (`--survey-file`, `--data`, `--verbose`, …).
+
+The file (`geant4_calibration.py` describes the format) has a header with the provenance (package version, survey file
+and its checksum), then one line per bank with the front face centre F and the unit vectors u (along the tubes, from the
+last to the first pixel end), w (across the tubes in the tube plane, towards tube 0) and n = u × w (the layer normal,
+away from the sample), in the NeXus frame in mm, with full double precision: the `front_face_centre`,
+`vector_along_tubes`, `vector_perpendicular_tubes` and `vector_perpendicular_layers` of `calibration.Bank`. These fix
+the full rigid placement of each bank (3 rotations and 3 shifts); the tube grid inside the bank stays the one of
+Geant4. All 9 banks are written; a bank that is not in the survey (e.g. bank 0 of SAM-606) is written from
+`REFERENCE_BANKS_DATA` (the intended geometry), marked with a comment in the file. The rear bank (0) moves along the
+beam: Geant4 uses its axes and the x and y of its front face centre, while the z is set by the rear detector distance of
+the simulation. Banks that are not in the file keep their nominal Geant4 placement.
+
+In Geant4 the calibration is selected by name, e.g. `sb_loki_sim bank_calibration=2026-September-SAM-606 …`, after
+rebuilding dgcode (`sb`) so that the new data file is installed; `bank_calibration=<path of a file>` uses a file
+directly. With `--data example` (the Geant4 geometry as input) the file reproduces the nominal Geant4 placement.
 
 ## A new survey
 
@@ -183,6 +218,8 @@ The new file and entry are part of the package, so the installed package must in
      `fix(points, verbose)` with `{label: np.array([X, Y, Z])}` in the file's frame, returning the corrected points; it
      should check its assumption and print a `WARNING` if it fails. See `sam606_fix_bank5_mislabelled_tube`.
    - `bank_notes`: notes printed with the checks of a bank (e.g. a tube made parallel by a fix).
+   - `calibration_name`: the name of the calibration made from this file, used for the Geant4 calibration file
+     (step 5). A name that says when and where the survey was made helps, like `2026-September-SAM-606`.
 
    To make the new survey the default, set `DEFAULT_SURVEY_FILE = NEW_SURVEY.path` (the tests use the SAM-606 file
    explicitly, so they are not affected).
@@ -193,7 +230,11 @@ The new file and entry are part of the package, so the installed package must in
    the quality report). The `Warning: Bank … differs from intended …` lines of the calibration are expected: they report
    the measured deviations of the tilts (> 0.1°) and distances (> 1 mm) from the intended geometry. A `WARNING` of the
    survey checks (step 3) is not expected.
-5. **Tests.** Add tests for the entry to `tests/test_survey_files.py`; the SAM-606 tests there (label map against the
+5. **Geant4.** `loki-calibrate --survey-file NEW.txt --geant4-calibration-file <dgcode_projects>/LOKI/G4GeoLoki/data/`
+   writes the calibration file for the Geant4 geometry (see
+   [Bank calibration for the Geant4 geometry](#bank-calibration-for-the-geant4-geometry)). Its bank volumes may then
+   need a check for overlaps in Geant4.
+6. **Tests.** Add tests for the entry to `tests/test_survey_files.py`; the SAM-606 tests there (label map against the
    nominal tube positions, the fix, the excess lengths) are the template. `test_a_minimal_entry_uses_the_coordinates_as_given`
    and `test_a_new_survey_file_with_its_own_entry` go through these steps with synthetic files.
 
