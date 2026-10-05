@@ -35,7 +35,7 @@ FORMAT_VERSION = 1
 FILE_PREFIX = "bank_calibration_"
 FILE_SUFFIX = ".txt"
 # the built-in nominal placements of the Geant4 geometry (no file)
-NOMINAL_NAME = "nominal-geometry"
+NOMINAL_NAME = "nominal-geant4-geometry"
 BANK_IDS = tuple(range(9))
 _NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -48,7 +48,8 @@ def file_name_for(name):
 
 def check_name(name):
     """A calibration name: letters, digits, '.', '_' and '-' (starting with a
-    letter or digit), not the reserved nominal-geometry. Raises ValueError."""
+    letter or digit), not the reserved nominal-geant4-geometry (the built-in nominal
+    placement of Geant4). Raises ValueError."""
     if not isinstance(name, str) or not _NAME_PATTERN.match(name):
         raise ValueError(
             f"invalid calibration name {name!r}: use letters, digits, '.', '_' and '-' only "

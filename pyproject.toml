@@ -24,6 +24,7 @@ loki-pixel-json = "loki_geometry.nexus_json:main"
 loki-verify-json = "loki_geometry.verify_json:main"
 loki-geant4-validate = "loki_geometry.geant4:main"
 loki-nominal-corners = "loki_geometry.nominal_corners:cli"
+loki-info = "loki_geometry.geometry_info:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "loki_geometry.__version__" }

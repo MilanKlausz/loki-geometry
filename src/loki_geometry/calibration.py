@@ -197,7 +197,12 @@ class Detectors:
           STRAW ENDS (it places the pixel centres at (j + 0.5) * L / N from 'A'),
           like the values in REFERENCE_BANKS_DATA, while positionA/B are pixel
           centres. With True (default) the points are moved back half a pixel
-          outwards along the tubes."""
+          outwards along the tubes.
+        decimals: the values are rounded to this many decimals [mm]; None: not rounded."""
+
+        def rounded(value):
+            return float(value) if decimals is None else round(float(value), decimals)
+
         bank_data = {}
         for bank_id in self.bank_ids:
             bank = self.banks[bank_id]
@@ -207,8 +212,8 @@ class Detectors:
                 positionA, positionB = positionA + half_pixel, positionB - half_pixel
             # rounded, as tuples of plain floats (the REFERENCE_BANKS_DATA format)
             bank_data[bank_id] = {
-                "A": [tuple(round(float(v), decimals) for v in pos) for pos in positionA],
-                "B": [tuple(round(float(v), decimals) for v in pos) for pos in positionB],
+                "A": [tuple(rounded(v) for v in pos) for pos in positionA],
+                "B": [tuple(rounded(v) for v in pos) for pos in positionB],
                 "num_tubes": c.TUBES_PER_BANK[bank_id],
             }
         return bank_data

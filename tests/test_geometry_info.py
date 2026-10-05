@@ -1,0 +1,361 @@
+"""Tests of the geometry information tool (geometry_info.py, loki-info): the named
+calibrations, the ids, and the positions compared with the reference values:
+REFERENCE_BANKS_DATA and loki.json (nominal-cad-geometry), the Geant4 model
+(nominal-geant4-geometry, the Python port and sb_loki_info values) and the Geant4
+geometry with the SAM-606 bank calibration (hard-coded values of G4GeoLoki)."""
+
+import numpy as np
+import pytest
+from test_nexus_json import LOKI_JSON_SAMPLE_OFFSETS_M, LOKI_JSON_TRANSLATIONS
+
+from loki_geometry import bank_pixels as lbp
+from loki_geometry import constants as c
+from loki_geometry import geant4 as g4
+from loki_geometry import geometry_info as gi
+from loki_geometry.reference_data import REFERENCE_BANKS_DATA
+
+SAM606 = "2026-September-SAM-606"
+CORNER_TUBES = ("front top", "back top", "front bottom", "back bottom")
+
+
+@pytest.fixture(scope="module")
+def cad():
+    return gi.LokiGeometry()
+
+
+@pytest.fixture(scope="module")
+def cad512():
+    return gi.LokiGeometry(gi.NOMINAL_CAD, 512)
+
+
+@pytest.fixture(scope="module")
+def geant4_nominal():
+    return gi.LokiGeometry(gi.NOMINAL_GEANT4)
+
+
+def corner_tube_ids(bank_id):
+    rows = c.TUBES_PER_LAYER[bank_id]
+    return (0, 3 * rows, rows - 1, 4 * rows - 1)  # the order of the 'A' / 'B' corners
+
+
+# --- calibrations ---------------------------------------------------------------
+
+
+def test_the_calibrations():
+    names = gi.available_calibrations()
+    assert list(names)[:2] == ["nominal-cad-geometry", "nominal-geant4-geometry"]
+    assert SAM606 in names
+    assert gi.DEFAULT_CALIBRATION == "nominal-cad-geometry"
+    assert gi.LokiGeometry().calibration == "nominal-cad-geometry"
+    with pytest.raises(ValueError, match="unknown calibration"):
+        gi.LokiGeometry("nominal-geometry")
+
+
+@pytest.mark.parametrize("pixels_per_straw", [0, -1, 2.5, "8"])
+def test_invalid_pixels_per_straw(pixels_per_straw):
+    with pytest.raises(ValueError):
+        gi.LokiGeometry(pixels_per_straw=pixels_per_straw)
+
+
+# --- nominal-cad-geometry: the reference values ---------------------------------
+
+
+@pytest.mark.parametrize("bank_id", c.BANK_IDS)
+def test_cad_reproduces_the_reference_corners(cad, bank_id):
+    """The straw ends of the corner tubes are the REFERENCE_BANKS_DATA corners: exactly for
+    the 4 corners that define the bank (A[0], A[1], A[2], B[0]), within the rounding of
+    the CAD values (0.01 mm) for the other 4."""
+    reference = REFERENCE_BANKS_DATA[bank_id]
+    worst = 0.0
+    for index, tube in enumerate(corner_tube_ids(bank_id)):
+        first, last = cad.tube_ends(bank_id, tube)
+        for point, expected, defining in (
+            (first, reference["A"][index], index < 3),
+            (last, reference["B"][index], index == 0),
+        ):
+            deviation = np.abs(point - np.array(expected)).max()
+            if defining:
+                assert deviation < 1e-9, (bank_id, CORNER_TUBES[index])
+            worst = max(worst, deviation)
+    assert worst < 0.011
+
+
+def test_cad_pixel_positions_agree_with_loki_json(cad512):
+    """loki.json (512 pixels per straw) was made from the CAD corners: translation + pixel
+    offset (5 decimals in m) agree within 0.011 mm."""
+    for bank_id, samples in LOKI_JSON_SAMPLE_OFFSETS_M.items():
+        magnitude, vector = LOKI_JSON_TRANSLATIONS[bank_id]
+        translation = magnitude * np.array(vector) * 1000
+        first = cad512.first_pixel_id(bank_id)
+        for local, offset in samples.items():
+            expected = translation + np.array(offset) * 1000
+            assert np.abs(cad512.pixel_centre(first + local) - expected).max() < 0.011, (
+                bank_id,
+                local,
+            )
+
+
+def test_cad_pixel_centres_are_the_bank_pixels_of_the_reference_corners(cad):
+    for bank_id in c.BANK_IDS:
+        expected = lbp.compute_bank_pixels(bank_id, REFERENCE_BANKS_DATA[bank_id]).pixel_centres
+        centres = cad.bank_pixel_centres(bank_id)
+        assert np.array_equal(centres, expected)
+        first = cad.first_pixel_id(bank_id)
+        for local in (0, 1, 255, 256, len(centres) // 2 + 3, len(centres) - 1):
+            assert np.allclose(cad.pixel_centre(first + local), centres[local], rtol=0, atol=1e-9)
+
+
+def test_cad_front_face_centres_and_distances(cad):
+    """The front face centre: the middle of the front layer tube axes, one tube radius
+    towards the sample. Pinned: the CAD distances of the drawing (SI-7615-463), with the
+    panel offsets of the front banks on top (e.g. bank 5: sqrt(1364.68^2 + 100^2))."""
+    expected = (4999.80, 2949.84, 3349.84, 2949.76, 3349.76, 1368.12, 1749.91, 1343.93, 1750.15)
+    for bank_id in c.BANK_IDS:
+        bank = cad.bank(bank_id)
+        assert bank.distance == pytest.approx(expected[bank_id], abs=0.005)
+        corners = REFERENCE_BANKS_DATA[bank_id]
+        mid = (np.array(corners["A"][0]) + corners["A"][2] + corners["B"][0] + corners["B"][2]) / 4
+        assert np.allclose(
+            bank.front_face_centre, mid - bank.layer_normal * c.TUBE_OUTER_RADIUS, atol=0.01
+        )
+
+
+@pytest.mark.parametrize("bank_id", c.BANK_IDS)
+def test_bank_axes(cad, bank_id):
+    """u, w, n: right-handed orthonormal, n away from the sample, u from the last to the
+    first pixel end, w towards tube 0."""
+    bank = cad.bank(bank_id)
+    u, w, n = bank.along_tubes, bank.across_tubes, bank.layer_normal
+    assert np.allclose(np.array([u, w, n]) @ np.array([u, w, n]).T, np.eye(3), atol=1e-12)
+    assert np.allclose(np.cross(u, w), n, atol=1e-12)
+    assert np.dot(n, bank.front_face_centre) > 0
+    first, last = cad.tube_ends(bank_id, 0)
+    assert np.allclose((first - last) / bank.straw_length, u, atol=1e-12)
+    tube0 = cad.tube_ends(bank_id, 0)[0]
+    tube1 = cad.tube_ends(bank_id, 1)[0]
+    assert np.dot(tube0 - tube1, w) == pytest.approx(c.TUBE_GRID_SIDE, abs=0.01)
+
+
+# --- nominal-geant4-geometry -----------------------------------------------------
+
+
+def test_geant4_nominal_is_the_geant4_port(geant4_nominal):
+    """The Python port of the Geant4 pixel centres (geant4.py), for every 97th pixel."""
+    worst = max(
+        np.abs(geant4_nominal.pixel_centre(p) - np.array(g4.pixel_centre(p))).max()
+        for p in range(0, geant4_nominal.total_number_of_pixels, 97)
+    )
+    assert worst < 1e-9
+
+
+def test_geant4_nominal_agrees_with_sb_loki_info(geant4_nominal):
+    """The pixel centres printed by the Geant4 code (sb_loki_info, 6 decimals)."""
+    for pixel, expected in g4._SB_LOKI_INFO_REFERENCE.items():
+        assert np.abs(geant4_nominal.pixel_centre(pixel) - np.array(expected)).max() < 1e-6
+
+
+def test_cad_and_geant4_nominal_differ_by_less_than_a_millimetre(cad, geant4_nominal):
+    """Geant4 uses rounded CAD values: up to 0.96 mm (bank 8); the rear bank is 0.2 mm
+    closer in CAD (4999.8 mm) than in Geant4 at 5 m."""
+    worst = {}
+    for bank_id in c.BANK_IDS:
+        difference = cad.bank_pixel_centres(bank_id) - geant4_nominal.bank_pixel_centres(bank_id)
+        worst[bank_id] = np.abs(difference).max()
+    assert max(worst.values()) < 1.0
+    assert worst[8] == max(worst.values())
+    assert worst[0] == pytest.approx(0.2, abs=1e-6)
+
+
+# --- the rear detector distance --------------------------------------------------
+
+
+@pytest.mark.parametrize("calibration", [gi.NOMINAL_CAD, gi.NOMINAL_GEANT4, SAM606])
+@pytest.mark.parametrize("distance", [4000.0, 10000.0])
+def test_rear_detector_distance_moves_only_bank_0_along_z(calibration, distance):
+    base = gi.LokiGeometry(calibration, 2)
+    moved = gi.LokiGeometry(calibration, 2, rear_detector_distance=distance)
+    assert moved.bank(0).front_face_centre[2] == pytest.approx(distance, abs=1e-9)
+    shift = moved.bank_pixel_centres(0) - base.bank_pixel_centres(0)
+    assert np.allclose(shift[:, :2], 0, atol=1e-9)
+    assert np.allclose(shift[:, 2], shift[0, 2], atol=1e-9)
+    for bank_id in range(1, 9):
+        assert np.array_equal(moved.bank_pixel_centres(bank_id), base.bank_pixel_centres(bank_id))
+
+
+# --- the SAM-606 calibration vs the Geant4 geometry with it ----------------------
+
+# Pixel centres [mm] of the Geant4 geometry (G4GeoLoki AimHelper) with
+# bank_calibration=2026-September-SAM-606, 256 pixels per straw, rear bank at 5 m.
+# (printed with G4GeoLoki.LokiAimHelper.AimHelper(5000.0, 256, 9, "2026-September-SAM-606"))
+GEANT4_SAM606_PIXELS = {
+    0: (498.046875, 779.861166, 5005.034130),  # bank 0
+    200781: (197.265625, 792.421389, 5057.553087),  # bank 0
+    401407: (-498.046875, -761.020832, 5099.144305),  # bank 0
+    401408: (496.326255, 710.454346, 2894.085240),  # bank 1
+    458829: (195.493490, 702.948630, 2947.270502),  # bank 1
+    516095: (-499.737467, 274.232101, 3030.251337),  # bank 1
+    516096: (536.619931, -250.309010, 3354.424904),  # bank 2
+    559181: (528.025926, -99.892536, 3407.663682),  # bank 2
+    602111: (211.189860, 247.997849, 3472.438523),  # bank 2
+    602112: (496.579326, -286.869033, 2934.778346),  # bank 3
+    659533: (195.776038, -279.687021, 2988.174609),  # bank 3
+    716799: (-499.312474, -699.567057, 2988.339350),  # bank 3
+    716800: (-225.518418, -249.875234, 3375.628210),  # bank 4
+    759885: (-217.116613, -99.402999, 3428.739943),  # bank 4
+    802815: (-523.508867, 248.047939, 3446.528306),  # bank 4
+    802816: (699.580079, 1092.452171, 1033.732948),  # bank 5
+    903245: (338.735694, 1095.711672, 1088.254358),  # bank 5
+    1003519: (-495.305032, 365.825460, 1354.211760),  # bank 5
+    1003520: (1192.550406, -614.694388, 1486.141780),  # bank 6
+    1118285: (1189.563705, -253.832893, 1540.565488),  # bank 6
+    1232895: (322.482482, 579.944908, 1743.400725),  # bank 6
+    1232896: (505.373319, -366.324032, 1254.012177),  # bank 7
+    1304653: (144.562282, -370.469061, 1308.693923),  # bank 7
+    1376255: (-689.051369, -891.882116, 1194.090183),  # bank 7
+    1376256: (-325.189538, -551.056837, 1645.128752),  # bank 8
+    1491021: (-323.054292, -190.161339, 1699.366736),  # bank 8
+    1605631: (-1189.239959, 642.836647, 1581.650662),  # bank 8
+}  # fmt: skip
+
+
+def test_sam606_agrees_with_the_geant4_geometry():
+    """The same pixel centres as Geant4 with the same calibration (all 9 banks; the rear bank
+    of both at 5 m). Banks 1-8 within 1e-6 mm. Bank 0 (not surveyed, from the CAD geometry):
+    within 0.002 mm, as its tube grid is built here from the REFERENCE_BANKS_DATA corners
+    (rounded to 0.01 mm), but in Geant4 from the exact tube pitches (the same at pixel 0, the
+    corner A[0])."""
+    assert len(GEANT4_SAM606_PIXELS) == 27
+    geometry = gi.LokiGeometry(SAM606, 256, rear_detector_distance=5000.0)
+    for pixel, expected in GEANT4_SAM606_PIXELS.items():
+        tolerance = 0.002 if geometry.decode(pixel)[0] == 0 else 1e-6
+        assert np.abs(geometry.pixel_centre(pixel) - np.array(expected)).max() < tolerance, pixel
+    assert np.abs(geometry.pixel_centre(0) - np.array(GEANT4_SAM606_PIXELS[0])).max() < 1e-6
+
+
+def test_sam606_takes_bank_0_from_the_cad_geometry(cad):
+    geometry = gi.LokiGeometry(SAM606)
+    assert np.array_equal(geometry.bank_pixel_centres(0), cad.bank_pixel_centres(0))
+    assert not np.array_equal(geometry.bank_pixel_centres(5), cad.bank_pixel_centres(5))
+
+
+# --- ids -------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("pixels_per_straw", [1, 7, 256, 512])
+def test_pixel_ids(pixels_per_straw):
+    geometry = gi.LokiGeometry(pixels_per_straw=pixels_per_straw)
+    n = pixels_per_straw
+    for bank_id in c.BANK_IDS:
+        assert geometry.first_pixel_id(bank_id) == lbp.bank_first_pixel_id(bank_id, n) - 1
+        assert geometry.number_of_pixels(bank_id) == lbp.pixels_in_bank(bank_id, n)
+    assert geometry.total_number_of_pixels == sum(c.TUBES_PER_BANK) * 7 * n == 896 * 7 * n
+    step = max(1, geometry.total_number_of_pixels // 4999)
+    for pixel in list(range(0, geometry.total_number_of_pixels, step)) + [
+        geometry.total_number_of_pixels - 1
+    ]:
+        bank_id, tube, straw, k = geometry.decode(pixel)
+        assert geometry.pixel_id(bank_id, tube, straw, k) == pixel
+        if n >= 2:
+            assert g4.pixel_id(bank_id, tube, straw, k, n) == pixel  # the Geant4 numbering
+
+
+def test_pixel_info(cad):
+    p = cad.pixel(802816 + (30 * 7 + 3) * 256 + 10)  # bank 5, tube 30 (layer 1, row 2), straw 3
+    assert (p.bank_id, p.tube_id, p.straw_id, p.pixel_in_straw, p.layer, p.row) == (
+        5,
+        30,
+        3,
+        10,
+        1,
+        2,
+    )
+    assert p.detector_number == p.pixel_id + 1
+    assert p.pixel_length == pytest.approx(1200 / 256)
+    first, last = cad.straw_ends(5, 30, 3)
+    assert np.allclose(p.centre, first + (last - first) * 10.5 / 256)
+    assert np.allclose(p.straw_direction, -cad.bank(5).along_tubes)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda g: g.decode(-1),
+        lambda g: g.decode(g.total_number_of_pixels),
+        lambda g: g.pixel_id(9, 0, 0, 0),
+        lambda g: g.pixel_id(1, 64, 0, 0),
+        lambda g: g.pixel_id(1, 0, 7, 0),
+        lambda g: g.pixel_id(1, 0, 0, 256),
+        lambda g: g.straw_ends(0, 224, 0),
+        lambda g: g.bank(-1),
+        lambda g: g.pixel(True),
+    ],
+)
+def test_invalid_ids(cad, call):
+    with pytest.raises(ValueError):
+        call(cad)
+
+
+# --- command line ------------------------------------------------------------------
+
+
+def run(argv, capsys):
+    code = gi.main(argv)
+    return code, capsys.readouterr().out
+
+
+def test_cli_summary(capsys):
+    code, out = run([], capsys)
+    assert code == 0
+    assert "Calibration: nominal-cad-geometry, 256 pixels per straw" in out
+    assert "(100.000, 727.187, 1154.532)  1368.118" in out  # bank 5
+    assert "-0.000" not in out
+
+
+def test_cli_list_calibrations(capsys):
+    code, out = run(["--list-calibrations"], capsys)
+    assert (
+        "nominal-cad-geometry (default)" in out
+        and "nominal-geant4-geometry" in out
+        and SAM606 in out
+    )
+
+
+def test_cli_pixel_and_detector_number(capsys):
+    _, by_id = run(["-p", "401408"], capsys)
+    _, by_number = run(["-d", "401409"], capsys)
+    assert by_id == by_number
+    assert "Pixel id 401408 (detector number 401409)" in by_id
+    assert "bank 1, tube 0 (layer 0, row 0), straw 0, pixel 0 in the straw" in by_id
+    _, in_m = run(["-p", "0", "--unit", "m", "--precision", "6"], capsys)
+    assert "centre [m]: (0.498047, 0.779861, 5.004834)" in in_m
+
+
+def test_cli_bank_tube_straw(capsys):
+    _, bank = run(["-c", SAM606, "-b", "2"], capsys)
+    assert (
+        "Bank 2 (mid left)" in bank
+        and "front face centre F [mm]: (379.498, -1.179, 3360.794)" in bank
+    )
+    _, tube = run(["-b", "2", "-t", "0"], capsys)
+    assert tube.count("  straw ") == 7 and "straw 3: pixel ids 516864..517119" in tube
+    _, straw = run(["-b", "2", "-t", "0", "-s", "3"], capsys)
+    assert "Bank 2, tube 0, straw 3" in straw and straw.count("  straw ") == 1
+
+
+@pytest.mark.parametrize(
+    "argv,message",
+    [
+        (["-c", "unknown"], "unknown calibration"),
+        (["-t", "1"], "--tube needs --bank"),
+        (["-b", "1", "-s", "1"], "--straw needs --tube"),
+        (["-p", "-1"], "pixel id must be"),
+        (["-b", "1", "-t", "64"], "tube id must be"),
+        (["-n", "0"], "pixels_per_straw"),
+        (["--precision", "-1"], "--precision"),
+    ],
+)
+def test_cli_errors(argv, message, capsys):
+    with pytest.raises(SystemExit) as error:
+        gi.main(argv)
+    assert error.value.code == 2
+    assert message in capsys.readouterr().err

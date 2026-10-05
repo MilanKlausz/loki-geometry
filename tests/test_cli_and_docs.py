@@ -94,6 +94,7 @@ def test_console_scripts_point_to_callables():
         "loki-verify-json",
         "loki-geant4-validate",
         "loki-nominal-corners",
+        "loki-info",
     }
     for target in scripts.values():
         module_name, function_name = target.split(":")

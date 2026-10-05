@@ -17,7 +17,7 @@ pip install -e ".[test]"               # editable install for development, with 
 pip install "git+https://github.com/MilanKlausz/loki-geometry.git"   # directly from the git repository
 ```
 
-This installs the package and the command-line tools `loki-calibrate`, `loki-survey`, `loki-pixel-json`,
+This installs the package and the command-line tools `loki-info`, `loki-calibrate`, `loki-survey`, `loki-pixel-json`,
 `loki-verify-json`, `loki-geant4-validate` and `loki-nominal-corners`. The same tools can be run without installing
 as `python3 -m loki_geometry.<module>` with `PYTHONPATH=src`. Run the tests with `python3 -m pytest` from the
 repository root; no installation is needed for that.
@@ -54,6 +54,7 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 | `survey_files` | What is specific to each known survey file, one `SurveyFile` entry per file: its tube label map (label → bank, tube id), and optionally its coordinate frame, a checksum of its content, fixes (e.g. the SAM-606 bank 5 fix) and notes. Unknown files, and files that do not match their checksum, are rejected. See [A new survey](#a-new-survey). |
 | `survey` (`loki-survey`) | Converts a survey file into calibration data, using the file's `survey_files` entry: fixes, frame conversion, grouping into tubes, sanity checks, trimming of the end electronics. |
 | `calibration` (`loki-calibrate`) | The calibration: calibration data → 8 corner positions per bank, quality report, comparison with the intended geometry, output in the `REFERENCE_BANKS_DATA` format. |
+| `geometry_info` (`loki-info`) | Geometry information for a chosen bank calibration: the placement of each bank (front face centre, axes, corners), the tube and straw ends, the pixel centres, and the id conversions (pixel id, detector number, bank / tube / straw / pixel). See [Geometry information](#geometry-information). |
 | `geant4_calibration` | Writes (and reads) the bank calibration file of the Geant4 geometry: per bank the front face centre and the three bank axes, selected in Geant4 with the geometry parameter `bank_calibration`. See [Bank calibration for the Geant4 geometry](#bank-calibration-for-the-geant4-geometry). |
 | `reference_data` | `REFERENCE_BANKS_DATA`: the intended corner positions (exact CAD values) and a converter to the calibration data format. This is the "intended" geometry of the comparisons. |
 | `geant4_example_data` | Calibration data from the Geant4 geometry (first and last pixel centres of the centre straw of two front-layer tubes per bank, all 9 banks), generated with `geant4`. Used to test the calibration. |
@@ -71,6 +72,44 @@ Repository layout:
 - `*_local/` (e.g. `sources_local/`): local material that is not version controlled, like documents, drawings, raw survey
   files and large JSON files. The package and the tests never read it; the values of the current instrument file
   (`loki.json`) that the tests compare with are hard-coded in `tests/test_nexus_json.py`.
+
+## Geometry information
+
+`loki-info` (module `geometry_info`, class `LokiGeometry`) gives the positions and ids of the banks, tubes, straws and
+pixels for a bank calibration, selected by name:
+
+| Calibration | What it is |
+| --- | --- |
+| `nominal-cad-geometry` (default) | The intended geometry: the corners of `REFERENCE_BANKS_DATA` (exact CAD values). |
+| `nominal-geant4-geometry` | The nominal geometry of the Geant4 model (its built-in tables, via `geant4`); in Geant4 `bank_calibration=nominal-geant4-geometry`. It differs from the CAD values by up to ~1 mm. |
+| a survey calibration | The `calibration_name` of a `survey_files` entry (e.g. `2026-September-SAM-606`); banks that are not in the survey are taken from `nominal-cad-geometry`. |
+
+```
+loki-info                                   # summary of all banks: pixel id ranges, front face centres, distances
+loki-info --list-calibrations
+loki-info -c 2026-September-SAM-606 -b 5    # one bank: front face centre, axes u / w / n, corners
+loki-info -b 2 -t 0                         # a tube: its axis and the 7 straws (ends, pixel ids)
+loki-info -b 2 -t 0 -s 3                    # one straw
+loki-info -p 401408                         # a pixel by its 0-based pixel id (Geant4) ...
+loki-info -d 401409 --unit m --precision 6  # ... or by its detector number (pixel id + 1)
+loki-info -n 512 -r 10000 -p 0              # 512 pixels per straw, rear bank front face at 10 m
+```
+
+Pixel ids are 0-based as in Geant4 (detector number = pixel id + 1): first pixel id of the bank + (tube × 7 + straw) ×
+pixels per straw + pixel in the straw. The rear bank is placed as in the calibration (CAD: 4999.8 mm); with
+`--rear-detector-distance` it is moved along z so that its front face centre is at that distance (as Geant4 does). The
+pixel geometry is built from the bank corners by `bank_pixels`, so it is the same as in the NeXus-JSON output and as in
+Geant4 for the same calibration (the tests compare it with the Geant4 pixel centres for the nominal and the SAM-606
+placements, and the CAD geometry with `REFERENCE_BANKS_DATA` and `loki.json`). From Python:
+
+```python
+from loki_geometry.geometry_info import LokiGeometry
+
+geometry = LokiGeometry("2026-September-SAM-606", pixels_per_straw=256)
+pixel = geometry.pixel(401408)  # ids, centre, straw ends, ...
+bank = geometry.bank(5)  # front_face_centre, along_tubes, across_tubes, layer_normal, distance, ...
+centres = geometry.bank_pixel_centres(5)  # all pixel centres of a bank [mm]
+```
 
 ## From the measured points to the 8 corner positions
 
@@ -148,7 +187,7 @@ loki-calibrate --geant4-calibration-file PATH [--geant4-calibration-name NAME]
 - `PATH` is a file, or a directory: then the file `bank_calibration_<NAME>.txt` is written in it. Giving the data
   directory of G4GeoLoki in a dgcode_projects checkout (`LOKI/G4GeoLoki/data/`) puts it where Geant4 looks for it.
 - `NAME` is the name of the calibration, i.e. the value of the Geant4 geometry parameter `bank_calibration`
-  (letters, digits, `.`, `_`, `-`; `nominal-geometry` is reserved for the built-in nominal placement). The default is
+  (letters, digits, `.`, `_`, `-`; `nominal-geant4-geometry` is reserved for the built-in nominal placement of Geant4). The default is
   the `calibration_name` of the survey file's entry in `survey_files` (`2026-September-SAM-606` for SAM-606). It is
   required for `--data reference` and `--data example`, which have no entry.
 - The other options work as usual (`--survey-file`, `--data`, `--verbose`, …).
