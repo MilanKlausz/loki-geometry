@@ -1,15 +1,21 @@
 """
 loki_geometry: geometry of the LOKI detector banks (ESS).
 
+The main purpose: the ACTUAL pixel positions of the detector, from a survey of
+the detector tubes, as NeXus-JSON nodes for the instrument's file-writer JSON
+template (which describes the nominal CAD geometry so far):
 - Calibration of the 8 bank corner positions from survey data
   (loki_geometry.survey, loki_geometry.calibration); the known survey files
   and what is specific to each of them are in loki_geometry.survey_files.
-- Pixel geometry (detector numbers and pixel offsets) from the bank corners,
-  and its export as NeXus-JSON nodes for the instrument file
-  (loki_geometry.bank_pixels, loki_geometry.nexus_json), with a verification
-  against the Geant4 geometry (loki_geometry.verify_json).
+- Pixel geometry (detector numbers and pixel offsets) from the bank corners of
+  a calibration, and its export as NeXus-JSON nodes for the instrument file
+  (loki_geometry.bank_pixels, loki_geometry.nexus_json, loki-pixel-json), with
+  a verification (loki_geometry.verify_json).
+Additions, also used to test the calibration:
 - Geometry information (positions and ids of banks, tubes, straws and pixels)
   for a named bank calibration (loki_geometry.geometry_info, loki-info).
+- The bank calibration file of the Geant4 geometry
+  (loki_geometry.geant4_calibration).
 - A Python port of the Geant4 pixel positions (loki_geometry.geant4).
 - The intended bank corners (loki_geometry.reference_data).
 - The shared geometry constants (loki_geometry.constants).

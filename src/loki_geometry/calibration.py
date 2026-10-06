@@ -64,6 +64,9 @@ layer bottom tube, back layer bottom tube] ("top/bottom" = lowest/highest tube
 id). With use_pixel_centre_position=True (as used by loki-calibrate) they are
 pixel CENTRE positions (moved half a pixel inwards from the straw ends),
 otherwise the straw ends. formatted_data() gives the straw ends in both cases.
+These corners are the input of the pixel geometry (bank_pixels.py) of the
+NeXus-JSON output (loki-pixel-json) and of loki-info, which select the
+calibration of a survey by its name (geometry_info.py).
 
 Algorithm (Bank._calculate_corner_positions)
 --------------------------------------------

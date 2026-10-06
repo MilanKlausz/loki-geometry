@@ -1,6 +1,8 @@
 """
 Geometry information of the LOKI detector banks (banks, tubes, straws and
-pixels: positions, directions and ids) for a chosen bank calibration.
+pixels: positions, directions and ids) for a chosen bank calibration. The
+calibrations (calibration_corners) are also those of the NeXus-JSON output
+(loki-pixel-json), so both give the same pixel positions.
 
 Usage
 -----
@@ -136,6 +138,23 @@ def _frozen_corners(corners):
         "B": tuple(tuple(float(v) for v in point) for point in corners["B"]),
         "num_tubes": corners["num_tubes"],
     }
+
+
+def calibration_bank_sources(calibration=DEFAULT_CALIBRATION):
+    """{bank_id: where the corners of the bank come from} for a calibration."""
+    if calibration not in available_calibrations():
+        raise ValueError(
+            f"unknown calibration {calibration!r} (known: {', '.join(available_calibrations())})"
+        )
+    if calibration == NOMINAL_GEANT4:
+        return {b: "the nominal Geant4 geometry (geant4.py)" for b in c.BANK_IDS}
+    cad = "REFERENCE_BANKS_DATA (the intended CAD geometry)"
+    if calibration == NOMINAL_CAD:
+        return {b: cad for b in c.BANK_IDS}
+    entry = next(e for e in SURVEY_FILES.values() if e.calibration_name == calibration)
+    surveyed = set(_survey_corners(calibration))
+    survey = f"survey {entry.file_name}" + (f" (sha256 {entry.checksum})" if entry.checksum else "")
+    return {b: survey if b in surveyed else cad for b in c.BANK_IDS}
 
 
 def _rear_bank_at(corners, distance):

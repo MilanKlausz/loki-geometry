@@ -8,6 +8,7 @@ import json
 
 import numpy as np
 import pytest
+from geant4_reference import GEANT4_SAM606_PIXELS
 from loki_json_reference import (  # the values of loki.json
     LOKI_JSON_FIRST_IDS_512,
     LOKI_JSON_PIXEL_SHAPE_VERTICES_M,
@@ -403,7 +404,20 @@ def test_main_default_is_pixel_centre_and_256_pixels(tmp_path):
 def test_main_decimals_option_rounds_the_metre_values(tmp_path):
     """--decimals is otherwise untested: 4 decimals in m = 0.1 mm grid."""
     filename = tmp_path / "out.json"
-    lnj.main(["-o", str(filename), "--banks", "7", "--pixels-per-straw", "2", "--decimals", "4"])
+    lnj.main(
+        [
+            "-o",
+            str(filename),
+            "-c",
+            "nominal-cad-geometry",
+            "--banks",
+            "7",
+            "--pixels-per-straw",
+            "2",
+            "--decimals",
+            "4",
+        ]
+    )
     group = json.loads(filename.read_text())["loki_detector_7"]
     offsets = np.column_stack(
         [vnj._child(group, f"{axis}_pixel_offset")["config"]["values"] for axis in "xyz"]
@@ -448,13 +462,22 @@ def test_main_bank_origin_centre_of_mass(tmp_path):
     """--bank-origin centre_of_mass: the translations (incl. detector_carriage_zero)
     are the centres of mass, the offsets are relative to them, the choice is
     recorded; the default is the first pixel end (corner A[0])."""
-    default = run_main(tmp_path, "--pixels-per-straw", "2", "--banks", "0", "3")
+    cad = ("-c", "nominal-cad-geometry")
+    default = run_main(tmp_path, *cad, "--pixels-per-straw", "2", "--banks", "0", "3")
     assert default["info"]["bank_origin"] == lbp.FIRST_PIXEL_END
     assert np.allclose(
         vnj.translation_mm(default[lnj.CARRIAGE_ZERO_NAME]), REFERENCE_BANKS_DATA[0]["A"][0]
     )
     data = run_main(
-        tmp_path, "--pixels-per-straw", "2", "--banks", "0", "3", "--bank-origin", "centre_of_mass"
+        tmp_path,
+        *cad,
+        "--pixels-per-straw",
+        "2",
+        "--banks",
+        "0",
+        "3",
+        "--bank-origin",
+        "centre_of_mass",
     )
     assert data["info"]["bank_origin"] == lbp.CENTRE_OF_MASS
     assert "centre of mass" in data["info"]["bank_translation"]
@@ -470,3 +493,98 @@ def test_main_bank_origin_centre_of_mass(tmp_path):
         [values(child(data["loki_detector_3"], f"{axis}_pixel_offset")) for axis in "xyz"]
     )
     assert np.allclose(offsets.mean(axis=0), 0.0, atol=1e-8)  # pixel centre offsets [m]
+
+
+# --- the main output: the measured geometry --------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def default_json(tmp_path_factory):
+    """loki-pixel-json with its defaults: the calibration of the default survey (SAM-606),
+    256 pixels per straw."""
+    path = tmp_path_factory.mktemp("default") / "pixels.json"
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert lnj.main(["-o", str(path)]) == 0
+    return path
+
+
+def test_the_default_output_is_the_measured_geometry(default_json):
+    """Survey -> calibration -> JSON: the pixel positions of the file (translation + offset +
+    pixel shape centre, read back like a NeXus reader) equal the Geant4 pixel centres with the
+    same calibration (G4GeoLoki, hard-coded) for the surveyed banks 1-8, within the rounding of
+    the file (8 decimals in m)."""
+    banks = vnj.read_pixel_positions(str(default_json))
+    checked = 0
+    for pixel_id, expected in GEANT4_SAM606_PIXELS.items():
+        bank_id = max(b for b in ALL_BANKS if lbp.bank_first_pixel_id(b) - 1 <= pixel_id)
+        if bank_id == 0:
+            continue  # not surveyed: the CAD geometry here, Geant4 puts it at the rear distance
+        ids, positions = banks[bank_id]
+        index = pixel_id + 1 - ids[0]
+        assert ids[index] == pixel_id + 1
+        assert np.abs(positions[index] - np.array(expected)).max() < 1e-4, pixel_id
+        checked += 1
+    assert checked == 24
+
+
+def test_the_default_output_records_its_calibration(default_json):
+    from loki_geometry import __version__
+
+    info = json.loads(default_json.read_text())["info"]
+    assert info["calibration"] == "2026-September-SAM-606"
+    assert info["written_by"] == f"loki-geometry {__version__}"
+    sources = info["bank_corner_sources"]
+    assert sources["0"].startswith("REFERENCE_BANKS_DATA")  # bank 0 was not surveyed
+    for bank_id in range(1, 9):
+        assert sources[str(bank_id)] == f"survey {SAM606.file_name} (sha256 {SAM606.checksum})"
+
+
+def test_the_default_output_is_the_geometry_tool_positions(default_json):
+    """The same positions as loki-info / LokiGeometry with the default calibration (all banks)."""
+    from loki_geometry.geometry_info import LokiGeometry
+
+    geometry = LokiGeometry()
+    for bank_id, (_ids, positions) in vnj.read_pixel_positions(str(default_json)).items():
+        assert np.abs(positions - geometry.bank_pixel_centres(bank_id)).max() < 1e-4, bank_id
+
+
+@pytest.mark.parametrize("calibration", ["nominal-cad-geometry", "nominal-geant4-geometry"])
+def test_main_with_another_calibration(tmp_path, calibration):
+    from loki_geometry.geometry_info import LokiGeometry
+
+    data = run_main(tmp_path, "-c", calibration, "--pixels-per-straw", "2")
+    assert data["info"]["calibration"] == calibration
+    geometry = LokiGeometry(calibration, 2)
+    banks = vnj.read_pixel_positions(str(tmp_path / "out.json"))
+    for bank_id, (_ids, positions) in banks.items():
+        assert np.abs(positions - geometry.bank_pixel_centres(bank_id)).max() < 1e-4
+
+
+def test_main_rejects_an_unknown_calibration(tmp_path, capsys):
+    with pytest.raises(SystemExit) as error:
+        lnj.main(["-o", str(tmp_path / "x.json"), "-c", "nominal-geometry"])
+    assert error.value.code == 2
+    assert "unknown calibration" in capsys.readouterr().err
+    assert not (tmp_path / "x.json").exists()
+
+
+def test_visualize_writes_a_nexus_tree(tmp_path):
+    """--visualize: the bank groups inside /entry/instrument (for geometry viewers), with 4
+    pixels per straw; the same groups as without the option."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        lnj.main(["-o", str(tmp_path / "view.json"), "--visualize", "--banks", "1", "5"])
+        lnj.main(
+            ["-o", str(tmp_path / "plain.json"), "--pixels-per-straw", "4", "--banks", "1", "5"]
+        )
+    view = json.loads((tmp_path / "view.json").read_text())
+    plain = json.loads((tmp_path / "plain.json").read_text())
+    (entry,) = view["children"]
+    assert entry["name"] == "entry" and vnj._attribute(entry, "NX_class") == "NXentry"
+    (instrument,) = entry["children"]
+    assert (
+        instrument["name"] == "instrument"
+        and vnj._attribute(instrument, "NX_class") == "NXinstrument"
+    )
+    assert [g["name"] for g in instrument["children"]] == ["loki_detector_1", "loki_detector_5"]
+    assert instrument["children"] == [plain["loki_detector_1"], plain["loki_detector_5"]]
+    assert view["info"]["pixels_per_straw"] == 4

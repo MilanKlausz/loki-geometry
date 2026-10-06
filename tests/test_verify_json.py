@@ -1,5 +1,7 @@
 """Tests of the verification of NeXus-JSON pixel positions against Geant4 (verify_json.py)."""
 
+import contextlib
+import io
 import json
 
 import numpy as np
@@ -247,3 +249,45 @@ def test_both_bank_origins_give_the_same_positions_in_the_json_file(tmp_path, pi
         ids_b, pos_b = positions[lbp.CENTRE_OF_MASS][bank_id]
         assert np.array_equal(ids_a, ids_b)
         assert np.allclose(pos_a, pos_b, rtol=0, atol=2e-5)  # 1e-8 m rounding of each part
+
+
+# --- the reference: the calibration of the file --------------------------------------
+
+
+@pytest.fixture(scope="module")
+def measured_json(tmp_path_factory):
+    """A loki-pixel-json output of the measured geometry (the default calibration)."""
+    path = tmp_path_factory.mktemp("measured") / "measured.json"
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert lnj.main(["-o", str(path), "--pixels-per-straw", "2"]) == 0
+    return path
+
+
+def test_a_file_is_compared_with_its_recorded_calibration(measured_json, capsys):
+    assert vnj.main([str(measured_json), "--tolerance", "0.001"]) == 0
+    out = capsys.readouterr().out
+    assert "deviation from the 2026-September-SAM-606 pixel centres" in out
+    assert "> tolerance" not in out
+
+
+def test_a_file_without_calibration_is_compared_with_the_nominal_geant4_geometry(
+    measured_json, tmp_path, capsys
+):
+    """E.g. loki.json: the nominal Geant4 geometry; the measured banks deviate from it."""
+    data = json.loads(measured_json.read_text())
+    del data["info"]
+    path = tmp_path / "no_info.json"
+    path.write_text(json.dumps(data))
+    assert vnj.main([str(path)]) == 1
+    out = capsys.readouterr().out
+    assert "deviation from the nominal-geant4-geometry pixel centres" in out
+    assert "bank 2: largest 3" in out  # the middle left bank is ~32 mm farther than nominal
+
+
+def test_the_calibration_option_overrides_the_file(measured_json, capsys):
+    assert vnj.main([str(measured_json), "-c", "nominal-cad-geometry"]) == 1
+    assert "deviation from the nominal-cad-geometry pixel centres" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as error:
+        vnj.main([str(measured_json), "-c", "unknown"])
+    assert error.value.code == 2
+    assert "unknown calibration" in capsys.readouterr().err

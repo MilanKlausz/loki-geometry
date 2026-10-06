@@ -46,7 +46,20 @@ def console_scripts():
 
 
 def readme_code_blocks(language=""):
-    return re.findall(r"^```" + language + r"\n(.*?)^```", read(README), re.S | re.M)
+    """The fenced code blocks of the README with this language tag ("" = no tag)."""
+    blocks, current, current_language = [], None, None
+    for line in read(README).splitlines():
+        if line.startswith("```"):
+            if current is None:
+                current, current_language = [], line[3:].strip()
+            else:
+                if current_language == language:
+                    blocks.append("\n".join(current) + "\n")
+                current = None
+        elif current is not None:
+            current.append(line)
+    assert current is None, "unclosed code block in the README"
+    return blocks
 
 
 def readme_commands():
@@ -287,9 +300,19 @@ def test_loki_pixel_json_and_verify_json_readme_examples(tmp_path, monkeypatch, 
         capsys,
     )
     assert code == 0 and "2 banks, 1568 pixels" in out
+    assert "calibration 2026-September-SAM-606" in out  # the default: the measured geometry
     code, out = run_entry_point(
         "loki-pixel-json",
-        ["-o", "base.json", "--pixels-per-straw", "2", "--pixel-reference", "pixel_base"],
+        [
+            "-o",
+            "base.json",
+            "-c",
+            "nominal-cad-geometry",
+            "--pixels-per-straw",
+            "2",
+            "--pixel-reference",
+            "pixel_base",
+        ],
         monkeypatch,
         capsys,
     )
@@ -302,11 +325,13 @@ def test_loki_pixel_json_and_verify_json_readme_examples(tmp_path, monkeypatch, 
         code, out = run_entry_point("loki-verify-json", args, monkeypatch, capsys)
         assert code == 0, out
         assert "> tolerance" not in out
-    # REFERENCE_BANKS_DATA deviates up to ~1 mm from Geant4 (bank 8), so a tight tolerance fails
-    code, out = run_entry_point(
-        "loki-verify-json", ["base.json", "--tolerance", "0.5"], monkeypatch, capsys
-    )
-    assert code == 1 and "bank 8" in out and "> tolerance!" in out
+    # REFERENCE_BANKS_DATA deviates up to ~1 mm from the nominal Geant4 geometry (bank 8), so a
+    # tight tolerance fails; the measured geometry is up to ~33 mm from it
+    args = ["-c", "nominal-geant4-geometry", "--tolerance", "0.5"]
+    code, out = run_entry_point("loki-verify-json", ["base.json", *args], monkeypatch, capsys)
+    assert code == 1 and "bank 8" in out and "> tolerance!" in out and "bank 1: largest 0." in out
+    code, out = run_entry_point("loki-verify-json", ["test.json", *args], monkeypatch, capsys)
+    assert code == 1 and "bank 2: largest 3" in out
 
 
 def test_python_m_module_invocation():

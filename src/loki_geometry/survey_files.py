@@ -31,9 +31,11 @@ An entry (SurveyFile), only file_name and label_map are required:
   fixes         optional: functions (points, verbose) -> points, applied in order
                 to the points (in the file's frame) right after reading them
   bank_notes    optional: {bank_id: note} printed with the checks of that bank
-  calibration_name  optional: the name of the bank calibration made from this
-                file, the default name of the Geant4 calibration file written by
-                loki-calibrate --geant4-calibration-file (see geant4_calibration.py)
+  calibration_name  optional, but needed to use the survey in loki-pixel-json and
+                loki-info (--calibration NAME; the calibration of the default
+                survey is their default): the name of the bank calibration made
+                from this file; also the default name of the Geant4 calibration
+                file (loki-calibrate --geant4-calibration-file)
 """
 
 import hashlib
@@ -60,7 +62,9 @@ class SurveyFile:
     description: str = ""
     fixes: tuple[Callable, ...] = ()
     bank_notes: dict[int, str] = field(default_factory=dict)
-    calibration_name: Optional[str] = None  # default Geant4 calibration name
+    calibration_name: Optional[str] = (
+        None  # the name of its calibration (loki-pixel-json, loki-info)
+    )
 
     @property
     def path(self):

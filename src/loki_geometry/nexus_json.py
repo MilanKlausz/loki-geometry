@@ -1,6 +1,11 @@
 """
 Export the LOKI detector pixel geometry as NeXus-JSON nodes, ready to be copied
-into the instrument's JSON file (the file-writer configuration, e.g. loki.json).
+into the instrument's JSON file (the file-writer configuration, e.g. loki.json):
+the main output of the package. The pixel positions are those of a bank
+calibration (--calibration, see geometry_info.py): by default the calibration of
+the default survey (the ACTUAL, surveyed geometry, e.g. 2026-September-SAM-606;
+banks that were not surveyed, like the rear bank of SAM-606, keep the intended
+CAD geometry), or nominal-cad-geometry / nominal-geant4-geometry.
 
 For each bank ("loki_detector_<id>") the output contains the geometry parts of
 its NXdetector group, in the same structure as in loki.json:
@@ -44,12 +49,23 @@ Output file layout:
    "loki_detector_1": <group>, ..., "loki_detector_8": <group>}
 (detector_carriage_zero only if bank 0 is written.)
 
+For a look at the geometry (--visualize) the groups are written inside a minimal
+NeXus tree instead, which NeXus-JSON geometry viewers can open (e.g.
+https://github.com/chribe/jsondisplay):
+  {"info": {...}, "children": [entry (NXentry) -> instrument (NXinstrument) ->
+                               loki_detector_<id> groups]}
+with 4 pixels per straw unless --pixels-per-straw is given (the pixel offsets
+are drawn as points). The detector carriage of bank 0 is not in this tree, so a
+viewer shows bank 0 without its translation (use --banks 1 2 ... 8 to leave it out).
+
 Usage:
-  loki-pixel-json -o loki_detector_pixels.json [--pixels-per-straw 256]
+  loki-pixel-json -o loki_detector_pixels.json [--calibration NAME] [--pixels-per-straw 256]
                   [--pixel-reference pixel_centre|pixel_base]
                   [--bank-origin first_pixel_end|centre_of_mass] [--banks 1 2 ...] [--decimals 8]
+  loki-pixel-json --visualize -o view.json --banks 1 2 3 4 5 6 7 8
 
-The corners currently come from REFERENCE_BANKS_DATA (the intended geometry).
+The output records the calibration and the source of the corners of each bank in
+"info" (calibration, bank_corner_sources).
 """
 
 import argparse
@@ -58,6 +74,7 @@ import sys
 
 import numpy as np
 
+from . import __version__
 from .bank_pixels import (
     BANK_ORIGINS,
     CENTRE_OF_MASS,
@@ -222,15 +239,24 @@ def bank_group(bank_pixels, decimals=DEFAULT_DECIMALS):
     return group(bank_name(bank_id), children, "NXdetector")
 
 
-def build_output(instrument_pixels, corners_source, decimals=DEFAULT_DECIMALS):
-    """The whole output dictionary (see the module docstring)."""
+def build_output(instrument_pixels, corners_source, decimals=DEFAULT_DECIMALS, calibration=None):
+    """The whole output dictionary (see the module docstring). corners_source: where the
+    corners come from (a text, or {bank_id: text}); calibration: its name (recorded in info)."""
     pixels_per_straw = {bp.pixels_per_straw for bp in instrument_pixels.values()}
     pixel_references = {bp.pixel_reference for bp in instrument_pixels.values()}
     bank_origins = {bp.bank_origin for bp in instrument_pixels.values()}
+    if isinstance(corners_source, dict):
+        sources = {str(b): corners_source[b] for b in instrument_pixels}
+        corners_source = "; ".join(sorted(set(sources.values())))
+    else:
+        sources = {str(b): corners_source for b in instrument_pixels}
     output = {
         "info": {
             "description": "LOKI detector pixel geometry (geometry parts of the loki_detector_<id> groups)",
+            "written_by": f"loki-geometry {__version__}",
+            "calibration": calibration,
             "corners_source": corners_source,
+            "bank_corner_sources": sources,
             "pixels_per_straw": pixels_per_straw.pop()
             if len(pixels_per_straw) == 1
             else sorted(pixels_per_straw),
@@ -256,6 +282,22 @@ def build_output(instrument_pixels, corners_source, decimals=DEFAULT_DECIMALS):
     return output
 
 
+VISUALIZE_PIXELS_PER_STRAW = 4  # --visualize: few points per straw for the viewers
+
+
+def viewer_tree(output):
+    """The bank groups of an output dictionary (build_output) inside a minimal NeXus tree
+    (entry / instrument), for NeXus-JSON geometry viewers (see the module docstring)."""
+    banks = [node for name, node in output.items() if name.startswith("loki_detector_")]
+    info = dict(output["info"])
+    info["layout"] = (
+        "the loki_detector_<id> groups in /entry/instrument, for geometry viewers; the detector "
+        "carriage of bank 0 is not included (bank 0 is shown without its translation)"
+    )
+    instrument = group("instrument", banks, "NXinstrument")
+    return {"info": info, "children": [group("entry", [instrument], "NXentry")]}
+
+
 def write_json(output, filename):
     with open(filename, "w") as file:
         json.dump(output, file, separators=(",", ":"))
@@ -266,6 +308,15 @@ def reference_corners():
     from .reference_data import REFERENCE_BANKS_DATA
 
     return dict(REFERENCE_BANKS_DATA)
+
+
+def calibration_corners(calibration):
+    """(corners of all banks, {bank_id: source description}) of a calibration (by name,
+    see geometry_info.available_calibrations)."""
+    from . import geometry_info as gi
+
+    corners = gi.calibration_corners(calibration)
+    return corners, gi.calibration_bank_sources(calibration)
 
 
 def _decimals(text):
@@ -289,11 +340,30 @@ def main(argv=None):
     parser.add_argument(
         "-o", "--output", default="loki_detector_pixels.json", help="output JSON file"
     )
+    from . import geometry_info as gi
+
+    parser.add_argument(
+        "-c",
+        "--calibration",
+        default=gi.DEFAULT_CALIBRATION,
+        help=f"bank calibration (default: {gi.DEFAULT_CALIBRATION}, the actual geometry from the "
+        f"default survey); also {gi.NOMINAL_CAD} (the intended CAD geometry) or {gi.NOMINAL_GEANT4}; "
+        "see loki-info --list-calibrations",
+    )
     parser.add_argument(
         "--pixels-per-straw",
         type=_positive_int,
-        default=DEFAULT_PIXELS_PER_STRAW,
-        help=f"pixels along each straw (default: {DEFAULT_PIXELS_PER_STRAW})",
+        default=None,
+        help=f"pixels along each straw (default: {DEFAULT_PIXELS_PER_STRAW}, with --visualize "
+        f"{VISUALIZE_PIXELS_PER_STRAW})",
+    )
+    parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="write the groups inside a minimal NeXus tree (/entry/instrument) that NeXus-JSON "
+        "geometry viewers can open (e.g. https://github.com/chribe/jsondisplay), with "
+        f"{VISUALIZE_PIXELS_PER_STRAW} pixels per straw by default; bank 0 is shown without its "
+        "carriage translation",
     )
     parser.add_argument(
         "--decimals",
@@ -326,8 +396,15 @@ def main(argv=None):
         "all pixel centres of the bank. The absolute pixel positions are the same for both",
     )
     args = parser.parse_args(argv)
+    if args.pixels_per_straw is None:
+        args.pixels_per_straw = (
+            VISUALIZE_PIXELS_PER_STRAW if args.visualize else DEFAULT_PIXELS_PER_STRAW
+        )
 
-    corners = reference_corners()
+    try:
+        corners, sources = calibration_corners(args.calibration)
+    except ValueError as error:
+        parser.error(str(error))
     if args.banks is not None:
         corners = {bank_id: corners[bank_id] for bank_id in args.banks}
     instrument_pixels = compute_instrument_pixels(
@@ -336,12 +413,13 @@ def main(argv=None):
         pixel_reference=args.pixel_reference,
         bank_origin=args.bank_origin,
     )
-    write_json(build_output(instrument_pixels, "REFERENCE_BANKS_DATA", args.decimals), args.output)
+    output = build_output(instrument_pixels, sources, args.decimals, calibration=args.calibration)
+    write_json(viewer_tree(output) if args.visualize else output, args.output)
     total = sum(len(bp.pixel_ids) for bp in instrument_pixels.values())
     print(
-        f"Written {args.output}: {len(instrument_pixels)} banks, {total} pixels, "
+        f"Written {args.output}: calibration {args.calibration}, {len(instrument_pixels)} banks, {total} pixels, "
         f"{args.pixels_per_straw} pixels per straw, pixel reference: {args.pixel_reference}, "
-        f"bank origin: {args.bank_origin}"
+        f"bank origin: {args.bank_origin}" + (" (NeXus tree for viewers)" if args.visualize else "")
     )
     return 0
 

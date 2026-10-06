@@ -1,8 +1,14 @@
 """
-Verify the pixel positions of a LOKI NeXus-JSON file against the Geant4
-geometry (via geant4.py, the Python port of the Geant4 pixel positions).
-Python counterpart of scripts/verifyJSON of the LOKI Geant4 geometry package
-G4GeoLoki (https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki).
+Verify the pixel positions of a LOKI NeXus-JSON file against the expected pixel
+positions of a bank calibration (geometry_info.py):
+  - a file written by loki-pixel-json records its calibration in "info": it is
+    compared with that calibration (e.g. the surveyed geometry), which the tests
+    show to agree with the Geant4 geometry using the same calibration;
+  - another file, e.g. the full instrument file loki.json, is compared with the
+    nominal Geant4 geometry (nominal-geant4-geometry, the Python port geant4.py),
+    as scripts/verifyJSON of the LOKI Geant4 geometry package G4GeoLoki does
+    (https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki);
+  - --calibration NAME compares with any calibration.
 
 Works with the output of nexus_json.py and with a full instrument file
 (e.g. loki.json). Pixel centre = bank translation + pixel offset + centre of
@@ -15,8 +21,9 @@ translation, with the carriage motion taken as zero).
 
 Assumptions:
   - bank 0 (rear bank) depends on the detector carriage, and it is compared
-    with the Geant4 geometry at the default rear bank distance of 5 m, i.e.
-    detector_carriage_zero must correspond to 5 m (as in loki.json);
+    with its position in the calibration (nominal Geant4: front face at 5 m;
+    CAD and the SAM-606 survey: 4999.8 mm), i.e. detector_carriage_zero must
+    correspond to that (as in loki.json);
   - all lengths are in m (the units attributes are not read), the translations
     have no further transformations (their depends_on is "."), and vertices 0
     and 2 of the pixel shape are the centres of the two cylinder faces.
@@ -25,7 +32,8 @@ Differences from verifyJSON: the default tolerance is 1.0 mm (verifyJSON:
 given (verifyJSON uses translation + offset only).
 
 Usage:
-  loki-verify-json FILE [--tolerance 1.0] [--pixels-per-straw N] [--ignore-pixel-shape]
+  loki-verify-json FILE [--calibration NAME] [--tolerance 1.0] [--pixels-per-straw N]
+                        [--ignore-pixel-shape]
 """
 
 import argparse
@@ -168,17 +176,40 @@ def read_pixel_positions(filename, use_pixel_shape=True):
 
 
 def compare_with_geant4(banks, pixels_per_straw):
-    """{bank_id: (largest deviation [mm], pixel id of it)} against Geant4."""
+    """{bank_id: (largest deviation [mm], pixel id of it)} against the nominal Geant4 geometry."""
+    return compare_with_calibration(banks, pixels_per_straw, None)
+
+
+def compare_with_calibration(banks, pixels_per_straw, calibration):
+    """{bank_id: (largest deviation [mm], pixel id of it)} against the pixel centres of a
+    calibration (geometry_info.py; None: the nominal Geant4 geometry of geant4.py)."""
+    geometry = None
+    if calibration is not None:
+        from .geometry_info import LokiGeometry
+
+        geometry = LokiGeometry(calibration, pixels_per_straw)
     results = {}
     for bank_id, (ids, positions) in banks.items():
-        geant4 = g4.bank_pixel_centres(bank_id, pixels_per_straw)
-        expected_ids = np.arange(len(geant4)) + g4.bank_pixel_offset(bank_id, pixels_per_straw) + 1
+        if geometry is None:
+            expected = g4.bank_pixel_centres(bank_id, pixels_per_straw)
+        else:
+            expected = geometry.bank_pixel_centres(bank_id)
+        expected_ids = (
+            np.arange(len(expected)) + g4.bank_pixel_offset(bank_id, pixels_per_straw) + 1
+        )
         if len(ids) != len(expected_ids) or np.any(ids != expected_ids):
             raise ValueError(f"bank {bank_id}: pixel ids do not match the Geant4 numbering")
-        deviation = np.linalg.norm(positions - geant4, axis=1)
+        deviation = np.linalg.norm(positions - expected, axis=1)
         worst = int(np.argmax(deviation))
         results[bank_id] = (float(deviation[worst]), int(ids[worst]))
     return results
+
+
+def file_calibration(filename):
+    """The calibration recorded in the "info" of a loki-pixel-json output (None if there is none)."""
+    with open(filename) as file:
+        info = json.load(file).get("info", {})
+    return info.get("calibration") if isinstance(info, dict) else None
 
 
 def _positive_int(text):
@@ -190,9 +221,16 @@ def _positive_int(text):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Compare LOKI pixel positions in a NeXus-JSON file with Geant4."
+        description="Compare the LOKI pixel positions of a NeXus-JSON file with the expected ones."
     )
     parser.add_argument("filename", help="NeXus-JSON file (loki-pixel-json output or loki.json)")
+    parser.add_argument(
+        "-c",
+        "--calibration",
+        default=None,
+        help="compare with this bank calibration (default: the calibration recorded in a "
+        "loki-pixel-json output, otherwise the nominal Geant4 geometry, nominal-geant4-geometry)",
+    )
     parser.add_argument(
         "--pixels-per-straw",
         type=_positive_int,
@@ -215,12 +253,21 @@ def main(argv=None):
         if pixels_per_straw is None:
             bank_id, (ids, _) = next(iter(banks.items()))
             pixels_per_straw = len(ids) // (TUBES_PER_BANK[bank_id] * STRAWS_PER_TUBE)
-        results = compare_with_geant4(banks, pixels_per_straw)
+        calibration = args.calibration or file_calibration(args.filename)
+        from .geometry_info import NOMINAL_GEANT4
+
+        calibration = calibration or NOMINAL_GEANT4
+        results = compare_with_calibration(
+            banks, pixels_per_straw, None if calibration == NOMINAL_GEANT4 else calibration
+        )
     except OSError as error:
         parser.error(f"cannot read {args.filename}: {error.strerror or error}")
     except ValueError as error:
         parser.error(f"{args.filename}: {error}")
-    print(f"{args.filename}: {pixels_per_straw} pixels per straw, deviation from Geant4 [mm]:")
+    print(
+        f"{args.filename}: {pixels_per_straw} pixels per straw, deviation from the "
+        f"{calibration} pixel centres [mm]:"
+    )
     for bank_id, (deviation, pixel) in results.items():
         flag = "" if deviation <= args.tolerance else "  > tolerance!"
         print(f"  bank {bank_id}: largest {deviation:.4f} (pixel {pixel}){flag}")
