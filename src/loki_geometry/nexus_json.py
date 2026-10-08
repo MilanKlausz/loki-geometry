@@ -43,20 +43,24 @@ Bank 0 (the rear bank) is on the moving detector carriage: its group depends on
 Other children of the groups in the instrument file (e.g. detector_events)
 are not geometry and are not written.
 
-Output file layout:
+Output file layout: the instrument tree of the instrument file, with only the
+geometry nodes of the detector banks in it (the structure of loki.json, so that
+the file can be read like the instrument file, e.g. by the verification scripts
+and NeXus-JSON geometry viewers):
   {"info": {...},
-   "loki_detector_0": <group>, "detector_carriage_zero": <translation dataset>,
-   "loki_detector_1": <group>, ..., "loki_detector_8": <group>}
-(detector_carriage_zero only if bank 0 is written.)
+   "children": [entry (NXentry) -> instrument (NXinstrument) -> [
+       loki_detector_0, ..., loki_detector_8   (the written banks),
+       detector_carriage (NXpositioner, if bank 0 is written):
+           value (NXlog: the carriage position, 0 here; a translation along z that
+                  depends on detector_carriage_zero),
+           transformations/detector_carriage_zero (the translation of bank 0),
+           depends_on]]}
+To update the instrument file, copy the loki_detector_<id> groups and the
+detector_carriage_zero dataset into it (see the README).
 
-For a look at the geometry (--visualize) the groups are written inside a minimal
-NeXus tree instead, which NeXus-JSON geometry viewers can open (e.g.
-https://github.com/chribe/jsondisplay):
-  {"info": {...}, "children": [entry (NXentry) -> instrument (NXinstrument) ->
-                               loki_detector_<id> groups]}
-with 4 pixels per straw unless --pixels-per-straw is given (the pixel offsets
-are drawn as points). The detector carriage of bank 0 is not in this tree, so a
-viewer shows bank 0 without its translation (use --banks 1 2 ... 8 to leave it out).
+--visualize: a file for a look at the geometry with NeXus-JSON geometry viewers
+(e.g. https://github.com/chribe/jsondisplay): 4 pixels per straw unless
+--pixels-per-straw is given (the pixel offsets are drawn as points).
 
 Usage:
   loki-pixel-json -o loki_detector_pixels.json [--calibration NAME] [--pixels-per-straw 256]
@@ -93,7 +97,9 @@ MIN_DECIMALS = 4  # coarsest accepted rounding (1e-4 m = 0.1 mm)
 INSTRUMENT_PATH = "/entry/instrument"
 CARRIAGE_BANK_ID = 0  # the bank on the moving detector carriage
 CARRIAGE_ZERO_NAME = "detector_carriage_zero"
-CARRIAGE_VALUE_PATH = f"{INSTRUMENT_PATH}/detector_carriage/value"
+CARRIAGE_PATH = f"{INSTRUMENT_PATH}/detector_carriage"
+CARRIAGE_VALUE_PATH = f"{CARRIAGE_PATH}/value"
+CARRIAGE_ZERO_PATH = f"{CARRIAGE_PATH}/transformations/{CARRIAGE_ZERO_NAME}"
 # what the bank translation points to, for each bank origin (info of the output)
 BANK_ORIGIN_DESCRIPTIONS = {
     FIRST_PIXEL_END: "from the sample to corner A[0]: the first pixel end of the centre straw of "
@@ -285,17 +291,60 @@ def build_output(instrument_pixels, corners_source, decimals=DEFAULT_DECIMALS, c
 VISUALIZE_PIXELS_PER_STRAW = 4  # --visualize: few points per straw for the viewers
 
 
-def viewer_tree(output):
-    """The bank groups of an output dictionary (build_output) inside a minimal NeXus tree
-    (entry / instrument), for NeXus-JSON geometry viewers (see the module docstring)."""
-    banks = [node for name, node in output.items() if name.startswith("loki_detector_")]
+def carriage_group(carriage_zero):
+    """The detector carriage of bank 0 (as in loki.json): its position (value, 0 here: in the
+    instrument file it comes from the motor), along z, depending on detector_carriage_zero."""
+    value = group(
+        "value",
+        [dataset("value", 0.0, "double", [attribute("units", "mm", "string")])],
+        "NXlog",
+    )
+    value["attributes"] += [
+        attribute("vector", [0.0, 0.0, 1.0], "double"),
+        attribute("depends_on", CARRIAGE_ZERO_PATH, "string"),
+        attribute("transformation_type", "translation", "string"),
+    ]
+    return group(
+        "detector_carriage",
+        [
+            value,
+            group("transformations", [carriage_zero], "NXtransformations"),
+            dataset("depends_on", CARRIAGE_ZERO_PATH, "string"),
+        ],
+        "NXpositioner",
+    )
+
+
+def instrument_tree(output):
+    """The nodes of an output dictionary (build_output) in the instrument tree that is written
+    to the file (see the module docstring)."""
     info = dict(output["info"])
     info["layout"] = (
-        "the loki_detector_<id> groups in /entry/instrument, for geometry viewers; the detector "
-        "carriage of bank 0 is not included (bank 0 is shown without its translation)"
+        f"the loki_detector_<id> groups in {INSTRUMENT_PATH}, and the detector carriage of bank 0 "
+        f"({CARRIAGE_ZERO_PATH}), as in the instrument file"
     )
-    instrument = group("instrument", banks, "NXinstrument")
+    children = [node for name, node in output.items() if name.startswith("loki_detector_")]
+    if CARRIAGE_ZERO_NAME in output:
+        children.append(carriage_group(output[CARRIAGE_ZERO_NAME]))
+    instrument = group("instrument", children, "NXinstrument")
     return {"info": info, "children": [group("entry", [instrument], "NXentry")]}
+
+
+def tree_nodes(tree):
+    """The inverse of instrument_tree: {"info": ..., "loki_detector_<id>": group, ...,
+    "detector_carriage_zero": dataset} of a file written by loki-pixel-json."""
+    nodes = {"info": tree.get("info")}
+    for entry in tree.get("children", []):
+        for instrument in entry.get("children", []):
+            for node in instrument.get("children", []):
+                if node.get("name", "").startswith("loki_detector_"):
+                    nodes[node["name"]] = node
+                elif node.get("name") == "detector_carriage":
+                    for child in node.get("children", []):
+                        if child.get("name") == "transformations":
+                            for dataset_node in child.get("children", []):
+                                nodes[dataset_node["config"]["name"]] = dataset_node
+    return nodes
 
 
 def write_json(output, filename):
@@ -360,10 +409,8 @@ def main(argv=None):
     parser.add_argument(
         "--visualize",
         action="store_true",
-        help="write the groups inside a minimal NeXus tree (/entry/instrument) that NeXus-JSON "
-        "geometry viewers can open (e.g. https://github.com/chribe/jsondisplay), with "
-        f"{VISUALIZE_PIXELS_PER_STRAW} pixels per straw by default; bank 0 is shown without its "
-        "carriage translation",
+        help="a file for NeXus-JSON geometry viewers (e.g. https://github.com/chribe/jsondisplay): "
+        f"{VISUALIZE_PIXELS_PER_STRAW} pixels per straw by default",
     )
     parser.add_argument(
         "--decimals",
@@ -414,12 +461,12 @@ def main(argv=None):
         bank_origin=args.bank_origin,
     )
     output = build_output(instrument_pixels, sources, args.decimals, calibration=args.calibration)
-    write_json(viewer_tree(output) if args.visualize else output, args.output)
+    write_json(instrument_tree(output), args.output)
     total = sum(len(bp.pixel_ids) for bp in instrument_pixels.values())
     print(
         f"Written {args.output}: calibration {args.calibration}, {len(instrument_pixels)} banks, {total} pixels, "
         f"{args.pixels_per_straw} pixels per straw, pixel reference: {args.pixel_reference}, "
-        f"bank origin: {args.bank_origin}" + (" (NeXus tree for viewers)" if args.visualize else "")
+        f"bank origin: {args.bank_origin}"
     )
     return 0
 

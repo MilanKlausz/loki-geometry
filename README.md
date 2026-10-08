@@ -49,11 +49,16 @@ repository root; no installation is needed for that.
 4. **Check it.** `loki-verify-json loki_detector_pixels.json` compares it with the pixel positions of its calibration;
    `loki-verify-json loki_detector_pixels.json -c nominal-geant4-geometry` shows how far the measured geometry is from
    the nominal one (tens of mm for some banks).
-5. **Copy it into the template** (in the repository of the instrument's JSON file): in each `loki_detector_<id>` group,
+   With the Geant4 geometry (in a dgcode_projects environment, the file is read like the instrument file):
+   `sb_g4geoloki_verifyjson --json loki_detector_pixels.json -rear 4.9998` compares it with the Geant4 pixel centres of
+   the calibration recorded in the file (`-rear 4.9998`: the rear bank of the CAD geometry, used for the banks that were
+   not surveyed, has its front face at 4.9998 m; Geant4 places it at the rear detector distance).
+5. **Copy it into the template** (in the repository of the instrument's JSON file). The output has the tree of the
+   instrument file, with only these nodes in `/entry/instrument`: in each `loki_detector_<id>` group,
    replace the geometry children (`detector_number`, `pixel_shape`, `x/y/z_pixel_offset`, `transformations`,
    `depends_on`) by those of the output, and the `detector_carriage_zero` dataset of
    `/entry/instrument/detector_carriage/transformations` by the one of the output (the rear bank). The other children
-   of the groups (e.g. `detector_events`) stay. This also fixes the half-pixel shift of the pixel shape of the current
+   of the groups (e.g. `detector_events`) and of the detector carriage (its `value` is the motor stream) stay. This also fixes the half-pixel shift of the pixel shape of the current
    `loki.json` (see [Pixel geometry for the instrument JSON file](#pixel-geometry-for-the-instrument-json-file)).
 
 ## Conventions
@@ -92,7 +97,7 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 | `survey` (`loki-survey`) | Converts a survey file into calibration data, using the file's `survey_files` entry: fixes, frame conversion, grouping into tubes, sanity checks, trimming of the end electronics. |
 | `calibration` (`loki-calibrate`) | The calibration: calibration data → 8 corner positions per bank, quality report, comparison with the intended geometry, output in the `REFERENCE_BANKS_DATA` format. |
 | `bank_pixels` | Pixel geometry core: from the 8 corners of a bank to the detector numbers and the pixel offsets (pixel centres or bases) of all its pixels (tube grid from vector steps between the corners, straw layout of Geant4, mirrored straw pattern for the upside-down banks 1, 2, 5, 6 derived from the corners). Corners are rejected if they are not finite, not consistent with each other (> 0.1 mm), have other tube pitches than 28.40 / 27.00 mm (> 0.5 mm, e.g. corners of another bank), are in the wrong order (first / last pixel ends swapped give a left-handed frame, A[1] / A[2] swapped give wrong tube pitches) or give a straw pattern that does not match the bank. |
-| `nexus_json` (`loki-pixel-json`) | The main output: the pixel geometry of a bank calibration (default: the measured geometry of the default survey) as NeXus-JSON nodes (the geometry parts of the `loki_detector_<id>` groups, plus `detector_carriage_zero` for the rear bank), ready to be copied into the instrument JSON file. |
+| `nexus_json` (`loki-pixel-json`) | The main output: the pixel geometry of a bank calibration (default: the measured geometry of the default survey) as NeXus-JSON nodes (the geometry parts of the `loki_detector_<id>` groups, plus `detector_carriage_zero` for the rear bank) in the instrument tree of the instrument JSON file, ready to be copied into it. |
 | `verify_json` (`loki-verify-json`) | Compares the pixel positions of a NeXus-JSON file with the expected ones: those of the calibration recorded in the file (the output above), otherwise (e.g. the full file `loki.json`) those of the nominal Geant4 geometry, as `scripts/verifyJSON` of G4GeoLoki does. |
 | `geometry_info` (`loki-info`) | Geometry information for a chosen bank calibration: the placement of each bank (front face centre, axes, corners), the tube and straw ends, the pixel centres, and the id conversions (pixel id, detector number, bank / tube / straw / pixel). See [Geometry information](#geometry-information). |
 | `geant4_calibration` | Writes (and reads) the bank calibration file of the Geant4 geometry: per bank the front face centre and the three bank axes, selected in Geant4 with the geometry parameter `bank_calibration`. See [Bank calibration for the Geant4 geometry](#bank-calibration-for-the-geant4-geometry). |
@@ -134,8 +139,12 @@ loki-verify-json path/to/loki.json                                 # the full in
 loki-verify-json path/to/loki.json --ignore-pixel-shape            # offsets only, without the pixel shape
 ```
 
-- Output: `{"info": {...}, "loki_detector_0": <group>, "detector_carriage_zero": <translation>, "loki_detector_1": <group>, …, "loki_detector_8": <group>}`
-  (`detector_carriage_zero` only if bank 0 is written). `info` records the calibration, the source of the corners of
+- Output: the instrument tree of the instrument file with only the detector geometry in it,
+  `{"info": {...}, "children": [entry → instrument → [loki_detector_0, …, loki_detector_8, detector_carriage]]}`,
+  so that it can be read like `loki.json` (e.g. by the Geant4 verification `sb_g4geoloki_verifyjson` and by
+  NeXus-JSON viewers). `detector_carriage` (only if bank 0 is written) holds `transformations/detector_carriage_zero`
+  and, as in `loki.json`, the carriage position `value` (0 here; in the instrument file it is the motor position) on
+  which bank 0 depends. `info` records the calibration, the source of the corners of
   each bank (`bank_corner_sources`: the survey file with its checksum, or `REFERENCE_BANKS_DATA` for a bank that was not
   surveyed), the package version and the options.
   Each group holds `detector_number`, `pixel_shape`, `x/y/z_pixel_offset` [m], `transformations` (banks 1–8: one
@@ -167,10 +176,8 @@ loki-verify-json path/to/loki.json --ignore-pixel-shape            # offsets onl
 - `loki-verify-json` computes the pixel centres as translation + offset + centre of the pixel shape cylinder, so it
   checks either convention and catches an inconsistent shape. It compares them with the calibration recorded in the
   file (`info.calibration`), otherwise with the nominal Geant4 geometry; `-c NAME` selects any calibration.
-- `--visualize` writes the groups inside a minimal NeXus tree (`/entry/instrument`) instead, with 4 pixels per straw by
-  default, for NeXus-JSON geometry viewers (e.g. [jsondisplay](https://github.com/chribe/jsondisplay), which draws the
-  pixel offsets as points). The detector carriage is not in that tree, so a viewer shows bank 0 without its
-  translation.
+- `--visualize`: 4 pixels per straw by default, for NeXus-JSON geometry viewers (e.g.
+  [jsondisplay](https://github.com/chribe/jsondisplay), which draws the pixel offsets as points).
 - Pixel ids: `bank first id + (tube · 7 + straw) · N + pixel`, with tube = layer · rows + row, as in Geant4 and the ICD.
 - Checks (all in `tests/`):
   - With the default calibration (the SAM-606 survey), the pixel positions read back from the file equal the pixel

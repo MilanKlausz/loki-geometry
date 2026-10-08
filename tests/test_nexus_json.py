@@ -348,7 +348,7 @@ def test_measured_corners_json_without_bank_0(tmp_path, measured_corners):
 def run_main(tmp_path, *args):
     filename = tmp_path / "out.json"
     lnj.main(["-o", str(filename), *args])
-    return json.loads(filename.read_text())
+    return lnj.tree_nodes(json.loads(filename.read_text()))
 
 
 def test_main_writes_selected_banks(tmp_path):
@@ -366,7 +366,7 @@ def test_main_writes_selected_banks(tmp_path):
             "pixel_base",
         ]
     )
-    data = json.loads(filename.read_text())
+    data = lnj.tree_nodes(json.loads(filename.read_text()))
     assert {key for key in data if key.startswith("loki_detector")} == {
         "loki_detector_1",
         "loki_detector_2",
@@ -418,7 +418,7 @@ def test_main_decimals_option_rounds_the_metre_values(tmp_path):
             "4",
         ]
     )
-    group = json.loads(filename.read_text())["loki_detector_7"]
+    group = lnj.tree_nodes(json.loads(filename.read_text()))["loki_detector_7"]
     offsets = np.column_stack(
         [vnj._child(group, f"{axis}_pixel_offset")["config"]["values"] for axis in "xyz"]
     )
@@ -568,9 +568,44 @@ def test_main_rejects_an_unknown_calibration(tmp_path, capsys):
     assert not (tmp_path / "x.json").exists()
 
 
-def test_visualize_writes_a_nexus_tree(tmp_path):
-    """--visualize: the bank groups inside /entry/instrument (for geometry viewers), with 4
-    pixels per straw; the same groups as without the option."""
+def test_main_writes_the_instrument_tree(tmp_path):
+    """The file is the instrument tree of loki.json (/entry/instrument with the bank groups and,
+    with bank 0, the detector carriage), and bank 0 depends on the carriage position, which
+    depends on detector_carriage_zero, as in loki.json."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        lnj.main(
+            ["-o", str(tmp_path / "tree.json"), "--pixels-per-straw", "2", "--banks", "0", "5"]
+        )
+    tree = json.loads((tmp_path / "tree.json").read_text())
+    (entry,) = tree["children"]
+    assert entry["name"] == "entry" and vnj._attribute(entry, "NX_class") == "NXentry"
+    (instrument,) = entry["children"]
+    assert (
+        instrument["name"] == "instrument"
+        and vnj._attribute(instrument, "NX_class") == "NXinstrument"
+    )
+    assert [g["name"] for g in instrument["children"]] == [
+        "loki_detector_0",
+        "loki_detector_5",
+        "detector_carriage",
+    ]
+    carriage = instrument["children"][2]
+    assert vnj._attribute(carriage, "NX_class") == "NXpositioner"
+    value = child(carriage, "value")
+    assert vnj._attribute(value, "depends_on") == lnj.CARRIAGE_ZERO_PATH
+    assert vnj._attribute(value, "vector") == [0.0, 0.0, 1.0]
+    assert values(child(value, "value")) == 0.0
+    assert values(child(instrument["children"][0], "depends_on")) == lnj.CARRIAGE_VALUE_PATH
+    assert values(child(carriage, "depends_on")) == lnj.CARRIAGE_ZERO_PATH
+    nodes = lnj.tree_nodes(tree)
+    assert set(nodes) == {"info", "loki_detector_0", "loki_detector_5", lnj.CARRIAGE_ZERO_NAME}
+    # the positions read from the tree (as from loki.json) are those of the nodes
+    banks = vnj.read_pixel_positions(tmp_path / "tree.json")
+    assert sorted(banks) == [0, 5]
+
+
+def test_visualize_writes_4_pixels_per_straw(tmp_path):
+    """--visualize: the same file with 4 pixels per straw (for geometry viewers)."""
     with contextlib.redirect_stdout(io.StringIO()):
         lnj.main(["-o", str(tmp_path / "view.json"), "--visualize", "--banks", "1", "5"])
         lnj.main(
@@ -578,13 +613,5 @@ def test_visualize_writes_a_nexus_tree(tmp_path):
         )
     view = json.loads((tmp_path / "view.json").read_text())
     plain = json.loads((tmp_path / "plain.json").read_text())
-    (entry,) = view["children"]
-    assert entry["name"] == "entry" and vnj._attribute(entry, "NX_class") == "NXentry"
-    (instrument,) = entry["children"]
-    assert (
-        instrument["name"] == "instrument"
-        and vnj._attribute(instrument, "NX_class") == "NXinstrument"
-    )
-    assert [g["name"] for g in instrument["children"]] == ["loki_detector_1", "loki_detector_5"]
-    assert instrument["children"] == [plain["loki_detector_1"], plain["loki_detector_5"]]
+    assert view["children"] == plain["children"]
     assert view["info"]["pixels_per_straw"] == 4
