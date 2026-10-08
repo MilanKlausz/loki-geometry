@@ -98,7 +98,7 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 | `geant4_calibration` | Writes (and reads) the bank calibration file of the Geant4 geometry: per bank the front face centre and the three bank axes, selected in Geant4 with the geometry parameter `bank_calibration`. See [Bank calibration for the Geant4 geometry](#bank-calibration-for-the-geant4-geometry). |
 | `reference_data` | `REFERENCE_BANKS_DATA`: the intended corner positions (exact CAD values) and a converter to the calibration data format. This is the "intended" geometry of the comparisons. |
 | `nominal_corners` (`loki-nominal-corners`) | Rebuilds the intended corner positions from the nominal bank distances, angles and offsets, and compares them with `REFERENCE_BANKS_DATA`. |
-| `geant4` (`loki-geant4-validate`) | Python port of the Geant4 pixel centre calculation (`AimHelper::getPixelCentreCoordinates` of [G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki)). It matches the C++ code to 1e-12 mm for all pixels (checked once with 1, 2, 3, 7, 256 and 512 pixels per straw), and the Geant4 values hard-coded in `geant4.py` (`sb_loki_info` output, used by `loki-geant4-validate`) and in `tests/test_geant4.py` (`sb_loki_info` and `LokiAimHelper` output) to 1e-6 mm. |
+| `geant4` (`loki-geant4-validate`) | Python port of the nominal pixel centre calculation of [G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki) (its original implementation, `AimHelper::getPixelCentreCoordinates`; the later implementation with one transform per bank, `BcsBanks::getBankTransform`, gives the same positions within 1e-9 mm). It matched the original C++ code to 1e-12 mm for all pixels (checked once with 1, 2, 3, 7, 256 and 512 pixels per straw), and the Geant4 values hard-coded in `geant4.py` (`sb_loki_info` output, used by `loki-geant4-validate`) and in `tests/test_geant4.py` (`sb_loki_info` and `LokiAimHelper` output) to 1e-6 mm. |
 | `geant4_example_data` | Calibration data from the Geant4 geometry (first and last pixel centres of the centre straw of two front-layer tubes per bank, all 9 banks), generated with `geant4`. Used to test the calibration. |
 | `constants` | The geometry constants shared by all modules (single source): bank layout, straw and tube grid dimensions, nominal bank placement (distances, position and face angles, offsets) and the derived tilt angles. |
 
@@ -494,8 +494,7 @@ pixels = compute_instrument_pixels(
   equally between the two ends (step 6). If the end electronics are not equally long on both ends, the bank is shifted
   along its tubes by half the difference.
 - **Geant4 geometry** ([G4GeoLoki](https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki)): it uses rounded CAD values, so `REFERENCE_BANKS_DATA` differs slightly from it (most in bank 8:
-  corners up to 0.96 mm, front face centre 0.59 mm, bank face 0.05°). The geometry building (`pycpp_GeoBCSBanks/geometry_module.cc`) and the pixel position code
-  (`libsrc/AimHelper.cc`) both take all positions from `BcsBanks.cc`, but apply the rotations separately.
+  corners up to 0.96 mm, front face centre 0.59 mm, bank face 0.05°).
 
 ## Development
 

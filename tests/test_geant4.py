@@ -5,7 +5,7 @@ The reference values below are hard-coded outputs of the LOKI Geant4 geometry
 package G4GeoLoki (https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki):
   - sb_loki_info --nominal_source_sample_distance_meters 0 -p <pixel>  (256 px, rear 5 m)
   - sb_loki_info --nominal_source_sample_distance_meters 0 -s 2 -r 10 -p <pixel>  (2 px, 10 m)
-  - G4GeoLoki.LokiAimHelper: AimHelper(rear, n).getPixelCentreCoordinates(pixel, False, False)
+  - G4GeoLoki.LokiAimHelper: AimHelper(rear, n).getPixelCentreCoordinates(pixel)
     (1 and 3 px, rear 5000 / 4099 mm), 6 decimals
 sb_loki_info also printed the decoded bank / tube / straw / in-straw ids, which
 were identical to the (bank, tube, straw, pixel) tuples used to build the ids.

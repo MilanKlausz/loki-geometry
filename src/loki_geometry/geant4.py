@@ -1,12 +1,17 @@
 """
-Python port of the pixel centre calculation of the LOKI Geant4 geometry
-package G4GeoLoki (https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki):
-AimHelper::getPixelCentreCoordinates and the BcsBanks / BcsPack / BcsTube /
-PixelatedBanks helpers it uses, so that the Geant4 pixel positions can be
-computed in Python alone.
+Python port of the nominal pixel centre calculation of the LOKI Geant4 geometry
+package G4GeoLoki (https://github.com/ess-dg/dgcode_projects/tree/main/LOKI/G4GeoLoki),
+so that the pixel positions of the nominal Geant4 geometry (nominal-geant4-geometry)
+can be computed in Python alone.
 
-Only the default LOKI setup is ported (no Larmor 2022 experiment, new tube
-numbering). Units: mm, radians internally. Coordinates: x horizontal (positive
+It ports the original implementation (dgcode_projects commit a653830):
+AimHelper::getPixelCentreCoordinates and the BcsBanks / BcsPack / BcsTube /
+PixelatedBanks helpers it uses, with the bank rotations as Euler angles and the
+bank positions. G4GeoLoki later replaced these by one rigid transform per bank
+(BcsBanks::getBankTransform, computed from the same tables, also used for the
+bank calibrations); it gives the same pixel centres (within 1e-9 mm). The tube
+numbering is the one of G4GeoLoki (BcsBanks::getTubeIdInBank). Units: mm,
+radians internally. Coordinates: x horizontal (positive
 left, beam's view), y up, z along the beam, origin at the sample.
 
 Validated against the output of
@@ -277,7 +282,7 @@ def _rotate(x, y, angle):
 def pixel_centre(
     pixel, straw_pixel_number=STRAW_PIXEL_NUMBER, rear_bank_distance=REAR_BANK_DISTANCE
 ):
-    """Port of AimHelper::getPixelCentreCoordinates (new tube numbering, not Larmor 2022)."""
+    """The nominal Geant4 pixel centre [mm] (port of the original AimHelper::getPixelCentreCoordinates)."""
     _check_pixels_per_straw(straw_pixel_number)
     _check_range("pixel id", pixel, total_pixels(straw_pixel_number))
     b = next(i for i in c.BANK_IDS if pixel < bank_pixel_offset(i + 1, straw_pixel_number))
