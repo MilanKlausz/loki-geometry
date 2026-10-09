@@ -24,7 +24,7 @@ Coordinates: x horizontal (positive to the left, looking along the beam), y up,
 z along the beam, origin at the sample; mm unless stated otherwise.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from . import constants  # noqa: F401
 from .bank_pixels import (  # noqa: F401
