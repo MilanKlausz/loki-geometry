@@ -26,6 +26,7 @@ while the z of F is given by the rear detector distance of the simulation.
 The numbers are written with full double precision (17 significant digits).
 """
 
+import os
 import re
 from pathlib import Path
 
@@ -114,9 +115,13 @@ def format_calibration(detectors, name, comments=(), fallback=None, fallback_lab
 def write_calibration_file(detectors, path, name, comments=(), fallback=None, fallback_label=None):
     """Write the calibration file (see format_calibration). path: a file, or an
     existing directory (the file bank_calibration_<name>.txt is written in it,
-    e.g. G4GeoLoki/data/ of dgcode_projects). Returns the Path written."""
+    e.g. G4GeoLoki/data/ of dgcode_projects). Returns the Path written. Raises
+    ValueError for a directory that does not exist (a path ending with '/')."""
     text = format_calibration(detectors, name, comments, fallback, fallback_label)
+    is_directory = str(path).endswith(("/", os.sep))
     path = Path(path)
+    if is_directory and not path.is_dir():
+        raise ValueError(f"the directory {path} does not exist")
     if path.is_dir():
         path = path / file_name_for(name)
     path.write_text(text)

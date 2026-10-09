@@ -263,6 +263,7 @@ def test_cli_writes_the_sam606_file_with_its_default_name(tmp_path, capsys, meas
     assert "# Bank 0 is not in the calibration input: written from REFERENCE_BANKS_DATA" in text
     assert SAM606.file_name in text and SAM606.checksum in text
     assert "loki-calibrate --data measured" in text
+    assert "Bank 5: tube UP9 constructed parallel to UP3 (bank 5 fix)." in text  # the survey note
 
 
 def _cli_comments(text):
@@ -378,3 +379,14 @@ def test_cli_reference_data_writes_all_banks_from_the_reference(tmp_path, capsys
     reference = _detectors(convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA))
     for bank_id in range(9):
         assert np.array_equal(banks[bank_id]["F"], reference.banks[bank_id].front_face_centre)
+
+
+def test_a_missing_directory_is_an_error_not_a_file(tmp_path, example, capsys):
+    """A path ending with '/' is a directory: if it does not exist (e.g. a typo in
+    G4GeoLoki/data/), nothing is written (API: ValueError; CLI: an error message)."""
+    with pytest.raises(ValueError, match="does not exist"):
+        gc.write_calibration_file(example, str(tmp_path / "typo") + "/", "my-test")
+    with pytest.raises(SystemExit):
+        calibration.main(["--geant4-calibration-file", str(tmp_path / "typo2") + "/"])
+    assert "does not exist" in capsys.readouterr().err
+    assert not (tmp_path / "typo").exists() and not (tmp_path / "typo2").exists()

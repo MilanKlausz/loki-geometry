@@ -169,9 +169,7 @@ def json_faces_mm(output, bank_id):
     """(first face centres, second face centres) of all pixel cylinders of a bank
     as described by the JSON output [mm]."""
     group = output[lnj.bank_name(bank_id)]
-    ids, positions = vnj.bank_pixels_from_group(
-        group, output.get(lnj.CARRIAGE_ZERO_NAME), use_pixel_shape=False
-    )
+    ids, positions = vnj.pixel_positions_from_tree(lnj.instrument_tree(output), False)[bank_id]
     vertices = np.array(values(child(child(group, "pixel_shape"), "vertices"))) * 1000
     return ids, positions + vertices[0], positions + vertices[2]
 
@@ -540,7 +538,9 @@ def test_the_default_output_records_its_calibration(default_json):
 
 
 def test_the_default_output_is_the_geometry_tool_positions(default_json):
-    """The same positions as loki-info / LokiGeometry with the default calibration (all banks)."""
+    """Round trip (not a geometry check: both sides use the same corners and pixel code; the
+    geometry is checked against Geant4 and loki.json elsewhere): the positions written to the
+    file are those of loki-info / LokiGeometry with the default calibration (all banks)."""
     from loki_geometry.geometry_info import LokiGeometry
 
     geometry = LokiGeometry()
@@ -550,6 +550,7 @@ def test_the_default_output_is_the_geometry_tool_positions(default_json):
 
 @pytest.mark.parametrize("calibration", ["nominal-cad-geometry", "nominal-geant4-geometry"])
 def test_main_with_another_calibration(tmp_path, calibration):
+    """Round trip for the other calibrations (the same code on both sides, see above)."""
     from loki_geometry.geometry_info import LokiGeometry
 
     data = run_main(tmp_path, "-c", calibration, "--pixels-per-straw", "2")
@@ -615,3 +616,65 @@ def test_visualize_writes_4_pixels_per_straw(tmp_path):
     plain = json.loads((tmp_path / "plain.json").read_text())
     assert view["children"] == plain["children"]
     assert view["info"]["pixels_per_straw"] == 4
+
+
+def test_main_reports_errors_cleanly(tmp_path, capsys):
+    """An output in a directory that does not exist: an error message (exit code 2), not a
+    traceback."""
+    with pytest.raises(SystemExit) as error:
+        lnj.main(["-o", str(tmp_path / "no_dir" / "x.json"), "--banks", "3"])
+    assert error.value.code == 2
+    assert "cannot write" in capsys.readouterr().err
+
+
+def test_info_records_the_rounding_and_the_carriage_only_with_bank_0(tmp_path):
+    with contextlib.redirect_stdout(io.StringIO()):
+        lnj.main(
+            [
+                "-o",
+                str(tmp_path / "a.json"),
+                "--pixels-per-straw",
+                "2",
+                "--banks",
+                "3",
+                "--decimals",
+                "6",
+            ]
+        )
+        lnj.main(["-o", str(tmp_path / "b.json"), "--pixels-per-straw", "2", "--banks", "0"])
+    a = json.loads((tmp_path / "a.json").read_text())["info"]
+    b = json.loads((tmp_path / "b.json").read_text())["info"]
+    assert a["decimals"] == 6 and b["decimals"] == lnj.DEFAULT_DECIMALS
+    assert "carriage_bank" not in a and "carriage_bank" in b
+
+
+def test_a_calibrated_rear_bank_through_to_the_carriage_zero(tmp_path):
+    """Bank 0 from tube data (calibration.py, here the Geant4 rear bank moved by (3, -2, 7) mm),
+    through the corners and the JSON file: bank 0 is placed by the carriage (value 0 +
+    detector_carriage_zero = its translation), and the positions read back from the file are
+    those of the moved Geant4 bank."""
+    import copy
+
+    from loki_geometry import geant4 as g4
+    from loki_geometry.calibration import Detectors
+    from loki_geometry.geant4_example_data import example_calibration_data
+
+    shift = np.array([3.0, -2.0, 7.0])
+    data = copy.deepcopy([bank for bank in example_calibration_data if bank["bank_id"] == 0])
+    for tube in data[0]["positions"]:
+        for end in ("first_pixel_end", "last_pixel_end"):
+            tube[end] = list(np.asarray(tube[end], dtype=float) + shift)
+    with contextlib.redirect_stdout(io.StringIO()):
+        detectors = Detectors(data, True, intended=None, run_checks=False)
+    corners = detectors.formatted_data(as_straw_ends=True, decimals=None)
+    pixels = lbp.compute_instrument_pixels(corners, 2)
+    filename = tmp_path / "bank0.json"
+    lnj.write_json(lnj.instrument_tree(lnj.build_output(pixels, "test")), filename)
+    tree = json.loads(filename.read_text())
+    carriage_zero = lnj.tree_nodes(tree)[lnj.CARRIAGE_ZERO_NAME]
+    assert np.allclose(vnj.translation_mm(carriage_zero), pixels[0].translation, atol=1e-5)
+    ids, positions = vnj.read_pixel_positions(filename)[0]
+    expected = (
+        np.array([g4.pixel_centre(int(i) - 1, 2) for i in ids]) + shift
+    )  # the moved Geant4 bank
+    assert np.abs(positions - expected).max() < 1e-4

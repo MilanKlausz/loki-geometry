@@ -106,6 +106,8 @@ def test_cad_pixel_positions_agree_with_loki_json(cad512):
 
 
 def test_cad_pixel_centres_are_the_bank_pixels_of_the_reference_corners(cad):
+    """Consistency of LokiGeometry with bank_pixels (the same code): the single-pixel lookup
+    agrees with the bank arrays. The geometry itself is checked against loki.json above."""
     for bank_id in c.BANK_IDS:
         expected = lbp.compute_bank_pixels(bank_id, REFERENCE_BANKS_DATA[bank_id]).pixel_centres
         centres = cad.bank_pixel_centres(bank_id)
@@ -396,3 +398,20 @@ def test_cli_detector_number_out_of_range(number, capsys):
         gi.main(["-d", str(number)])
     assert error.value.code == 2
     assert "detector number must be in 1 .. 1605632" in capsys.readouterr().err
+
+
+def test_failed_survey_checks_are_reported(monkeypatch, capsys):
+    """The survey checks only print warnings (in the survey output, which loki-pixel-json /
+    loki-info do not show): a failed check must be reported on stderr. A label map with a
+    tube one row off (C2UP3 is tube 13 of bank 1) fails the tube id check."""
+    from loki_geometry import survey_files
+
+    monkeypatch.setattr(gi, "_reported_survey_warnings", set())
+    gi.calibration_corners("2026-September-SAM-606")
+    assert capsys.readouterr().err == ""  # the real survey passes all checks
+    monkeypatch.setitem(survey_files.SAM606_LABEL_MAP, "C2UP3", (1, 12))
+    gi.calibration_corners("2026-September-SAM-606")
+    gi.calibration_corners("2026-September-SAM-606")  # reported once
+    err = capsys.readouterr().err
+    assert err.count("survey check(s) of the calibration 2026-September-SAM-606 failed") == 1
+    assert "mismatch" in err

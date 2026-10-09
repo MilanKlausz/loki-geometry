@@ -241,12 +241,19 @@ def test_formatted_data_straw_ends_are_one_straw_length_apart():
         assert np.allclose(lengths, c.STRAW_LENGTHS[bank_id], atol=1e-6)
 
 
+# SAM-606: the largest distance of the model tubes from the input tubes [mm] (calibrate
+# --verbose: 0.08, 0.12, 0.25, 0.71, 0.45, 0.37, 1.44, 0.15 for banks 1-8), with a 0.1 mm margin
+SAM606_RESIDUAL_LIMITS = {1: 0.2, 2: 0.25, 3: 0.35, 4: 0.85, 5: 0.55, 6: 0.5, 7: 1.55, 8: 0.25}
+
+
 def test_measured_banks_reproduce_their_input_tubes(measured_detectors):
-    for bank in measured_detectors.banks.values():
+    """Regression bounds per bank (the measured values plus a small margin): a change of the
+    calibration that moves the model tubes by a few tenths of a mm in any bank shows up."""
+    for bank_id, bank in measured_detectors.banks.items():
         worst = max(
             np.linalg.norm(residual) for _, residual, _ in bank.quality["reproduction_residuals"]
         )
-        assert worst < 2.0
+        assert worst < SAM606_RESIDUAL_LIMITS[bank_id], (bank_id, worst)
 
 
 def test_measured_banks_are_on_the_expected_side_of_the_beam():
@@ -259,10 +266,13 @@ def test_measured_banks_are_on_the_expected_side_of_the_beam():
         centre = detectors.banks[bank_id].front_face_centre
         assert np.sign(centre[axis]) == sign
         assert centre[2] > 0
-    for bank_id in (5, 6, 7, 8):
+    # the measured panel offsets differ from the nominal ones by +2.05, -2.30, +8.03, -4.06 mm
+    # (banks 5-8): within 0.5 mm of these (a sign or axis error would be far off)
+    measured_differences = {5: 2.05, 6: -2.30, 7: 8.03, 8: -4.06}
+    for bank_id, difference in measured_differences.items():
         _, _, offset = detectors.section_parameters(bank_id)
         _, _, nominal = detectors.nominal_section_parameters(bank_id)
-        assert offset == pytest.approx(nominal, abs=10.0)
+        assert offset - nominal == pytest.approx(difference, abs=0.5), bank_id
 
 
 def test_measured_front_face_distance_shifts_with_the_sample_to_window_distance(
@@ -502,3 +512,121 @@ def test_calibrate_cli_reports_a_missing_survey_file(tmp_path, capsys):
         _quiet(calibration.main, ["--survey-file", str(tmp_path / sf.SAM606_FILE_NAME)])
     assert error.value.code == 2
     assert "cannot read" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("bank_id", [-1, 9, True, 2.0])
+def test_an_unknown_bank_id_is_rejected(bank_id):
+    data = _geant4_bank_data(3, (0, 15))
+    data["bank_id"] = bank_id
+    with pytest.raises(ValueError, match="unknown bank id"):
+        _detectors([data])
+
+
+@pytest.mark.parametrize("tube_id", [-1, 16, 40])
+def test_a_tube_id_outside_the_front_layer_is_rejected(tube_id):
+    """Bank 1 has 16 tubes per layer (ids 0-15)."""
+    data = _geant4_bank_data(1, (0, 5))
+    data["positions"][1]["tube_id"] = tube_id
+    with pytest.raises(ValueError, match="not a front layer tube"):
+        _detectors([data])
+
+
+def _rotated_about(point, centre, axis, angle):
+    """point rotated by angle about the line through centre along the unit vector axis."""
+    v = np.asarray(point, dtype=float) - centre
+    rotated = (
+        v * np.cos(angle)
+        + np.cross(axis, v) * np.sin(angle)
+        + axis * np.dot(axis, v) * (1 - np.cos(angle))
+    )
+    return centre + rotated
+
+
+@pytest.mark.parametrize("bank_id", [1, 2, 5, 7])
+def test_imperfect_input_known_answer(bank_id):
+    """Known answer for imperfect input, where the averaging steps of the algorithm matter
+    (with perfect input every step is exact): the two input tubes are turned by +/- 0.5 deg
+    in the bank plane (about the layer normal) and moved by +/- 1.5 mm across the tubes. The
+    direction along the tubes is the bisector of the two tube directions and tube 0 the mean
+    of the two predictions, so the corners are those of the unperturbed bank."""
+    rows = c.TUBES_PER_LAYER[bank_id]
+    expected = g4.bank_corners(bank_id)
+    a0, a2, b0 = (
+        np.array(p, dtype=float) for p in (expected["A"][0], expected["A"][2], expected["B"][0])
+    )
+    along = (a0 - b0) / np.linalg.norm(a0 - b0)  # last -> first pixel end
+    across = (a2 - a0) - np.dot(a2 - a0, along) * along
+    across /= np.linalg.norm(across)
+    normal = np.cross(along, across)
+    data = _geant4_bank_data(bank_id, (2, rows - 3))
+    for tube, sign in zip(data["positions"], (1, -1)):
+        first, last = np.array(tube["first_pixel_end"]), np.array(tube["last_pixel_end"])
+        middle = (first + last) / 2
+        for end, point in (("first_pixel_end", first), ("last_pixel_end", last)):
+            moved = _rotated_about(point, middle, normal, sign * np.radians(0.5))
+            tube[end] = list(moved + sign * 1.5 * across)
+    corners = _detectors([data]).formatted_data(decimals=9)[bank_id]
+    for end in "AB":
+        assert np.allclose(corners[end], expected[end], atol=1e-6), end
+
+
+def _bank_axes(bank_id):
+    """(along: last -> first pixel end, across: towards the higher tube ids) of the nominal bank."""
+    expected = g4.bank_corners(bank_id)
+    a0, a2, b0 = (
+        np.array(p, dtype=float) for p in (expected["A"][0], expected["A"][2], expected["B"][0])
+    )
+    along = (a0 - b0) / np.linalg.norm(a0 - b0)
+    across = (a2 - a0) - np.dot(a2 - a0, along) * along
+    return along, across / np.linalg.norm(across)
+
+
+@pytest.mark.parametrize("bank_id", [3, 6])
+def test_quality_numbers_decompose_a_known_offset(bank_id):
+    """Tube b moved 1 mm along the tubes and 0.5 pitch across them (away from tube a): the
+    difference of the two tube 0 predictions (a - b, in the calibration frame u, w, n; w points
+    towards tube 0) is (-1 mm, +0.5 pitch, 0), and
+    the measured tube spacing (perpendicular to the tubes) is the id difference + 0.5 pitch."""
+    along, across = _bank_axes(bank_id)
+    data = _geant4_bank_data(bank_id, (2, 9))
+    tube_b = data["positions"][1]
+    for end in ("first_pixel_end", "last_pixel_end"):
+        tube_b[end] = list(np.array(tube_b[end]) + 1.0 * along + 0.5 * c.TUBE_GRID_SIDE * across)
+    quality = _detectors([data]).banks[bank_id].quality
+    assert quality["tube0_prediction_difference"] == pytest.approx(
+        [-1.0, 0.5 * c.TUBE_GRID_SIDE, 0.0], abs=1e-6
+    )
+    assert quality["spacing_in_pitches"] == pytest.approx(7.5, abs=1e-9)
+
+
+def _moved_bank_3(dz, tilt_deg):
+    """REFERENCE_BANKS_DATA calibration data with bank 3 moved by dz along z and tilted by
+    about tilt_deg (z grows with y)."""
+    data = copy.deepcopy(convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA))
+    bank = next(b for b in data if b["bank_id"] == 3)
+    keys = ("first_pixel_end", "last_pixel_end")
+    y_centre = np.mean([p[k][1] for p in bank["positions"] for k in keys])
+    for position in bank["positions"]:
+        for key in keys:
+            point = np.array(position[key], dtype=float)
+            point[2] += dz + np.tan(np.radians(tilt_deg)) * (point[1] - y_centre)
+            position[key] = tuple(point)
+    return data
+
+
+@pytest.mark.parametrize(
+    "dz, tilt_deg, distance_warning, tilt_warning",
+    [
+        (0.5, 0.0, False, False),
+        (1.5, 0.0, True, False),
+        (0.0, 0.05, False, False),
+        (0.0, 0.15, False, True),
+    ],
+)
+def test_the_check_tolerances(capsys, dz, tilt_deg, distance_warning, tilt_warning):
+    """At the limits of the checks against the intended geometry: 1 mm for the sample - bank
+    distance and 0.1 deg for the tilt."""
+    calibration.Detectors(_moved_bank_3(dz, tilt_deg), True)
+    out = capsys.readouterr().out
+    assert ("Warning: Bank 3 sample bank distance" in out) == distance_warning
+    assert ("Warning: Bank 3 tilt angle" in out) == tilt_warning

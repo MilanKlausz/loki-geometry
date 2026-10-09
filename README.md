@@ -60,6 +60,11 @@ repository root; no installation is needed for that.
    `/entry/instrument/detector_carriage/transformations` by the one of the output (the rear bank). The other children
    of the groups (e.g. `detector_events`) and of the detector carriage (its `value` is the motor stream) stay. This also fixes the half-pixel shift of the pixel shape of the current
    `loki.json` (see [Pixel geometry for the instrument JSON file](#pixel-geometry-for-the-instrument-json-file)).
+6. **Check the updated template.** It has no `info` (no recorded calibration), so give the calibration:
+   `loki-verify-json path/to/loki.json -c 2026-September-SAM-606` and, with the Geant4 geometry,
+   `sb_g4geoloki_verifyjson --json path/to/loki.json --bankCalibration 2026-September-SAM-606 -rear 4.9998`. Both read
+   the banks by name and follow their `depends_on` chains (bank 0 through the detector carriage), so a broken chain, a
+   transformation that is not a translation or a wrong unit is an error or shows as a deviation.
 
 ## Conventions
 
@@ -96,7 +101,7 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 | `survey_files` | What is specific to each known survey file, one `SurveyFile` entry per file: its tube label map (label → bank, tube id), and optionally its coordinate frame, a checksum of its content, fixes (e.g. the SAM-606 bank 5 fix) and notes. Unknown files, and files that do not match their checksum, are rejected. See [A new survey](#a-new-survey). |
 | `survey` (`loki-survey`) | Converts a survey file into calibration data, using the file's `survey_files` entry: fixes, frame conversion, grouping into tubes, sanity checks, trimming of the end electronics. |
 | `calibration` (`loki-calibrate`) | The calibration: calibration data → 8 corner positions per bank, quality report, comparison with the intended geometry, output in the `REFERENCE_BANKS_DATA` format. |
-| `bank_pixels` | Pixel geometry core: from the 8 corners of a bank to the detector numbers and the pixel offsets (pixel centres or bases) of all its pixels (tube grid from vector steps between the corners, straw layout of Geant4, mirrored straw pattern for the upside-down banks 1, 2, 5, 6 derived from the corners). Corners are rejected if they are not finite, not consistent with each other (> 0.1 mm), have other tube pitches than 28.40 / 27.00 mm (> 0.5 mm, e.g. corners of another bank), are in the wrong order (first / last pixel ends swapped give a left-handed frame, A[1] / A[2] swapped give wrong tube pitches) or give a straw pattern that does not match the bank. |
+| `bank_pixels` | Pixel geometry core: from the 8 corners of a bank to the detector numbers and the pixel offsets (pixel centres or bases) of all its pixels (tube grid from vector steps between the corners, straw layout of Geant4, mirrored straw pattern for the upside-down banks 1, 2, 5, 6 derived from the corners). Corners are rejected if they are not finite, not consistent with each other (> 0.1 mm), have other tube pitches than 28.40 / 27.00 mm (> 0.5 mm, e.g. corners of another bank), are in the wrong order (first / last pixel ends swapped give a left-handed frame, A[1] / A[2] swapped give wrong tube pitches) give a straw pattern that does not match the bank, or have another straw length than the nominal one of the bank (> 0.1 mm: e.g. untrimmed tube ends or pixel-centre corners). |
 | `nexus_json` (`loki-pixel-json`) | The main output: the pixel geometry of a bank calibration (default: the measured geometry of the default survey) as NeXus-JSON nodes (the geometry parts of the `loki_detector_<id>` groups, plus `detector_carriage_zero` for the rear bank) in the instrument tree of the instrument JSON file, ready to be copied into it. |
 | `verify_json` (`loki-verify-json`) | Compares the pixel positions of a NeXus-JSON file with the expected ones: those of the calibration recorded in the file (the output above), otherwise (e.g. the full file `loki.json`) those of the nominal Geant4 geometry, as `scripts/verifyJSON` of G4GeoLoki does. |
 | `geometry_info` (`loki-info`) | Geometry information for a chosen bank calibration: the placement of each bank (front face centre, axes, corners), the tube and straw ends, the pixel centres, and the id conversions (pixel id, detector number, bank / tube / straw / pixel). See [Geometry information](#geometry-information). |
@@ -173,9 +178,14 @@ loki-verify-json path/to/loki.json --ignore-pixel-shape            # offsets onl
   at the offset point, as if the offsets pointed to the pixel bases. So its pixel
   volumes are shifted by half a pixel along the straws (0.49 / 0.98 / 1.17 mm for the 500 / 1000 / 1200 mm straws with 512 pixels per straw). `loki-verify-json`
   shows this unless `--ignore-pixel-shape` is given.
-- `loki-verify-json` computes the pixel centres as translation + offset + centre of the pixel shape cylinder, so it
-  checks either convention and catches an inconsistent shape. It compares them with the calibration recorded in the
+- `loki-verify-json` computes the pixel centres as bank position + offset + centre of the pixel shape cylinder, so it
+  checks either convention and catches an inconsistent shape. The bank position is the sum of the translations of the
+  `depends_on` chain of the bank group (bank 0: the carriage position, 0 if it is a stream, and
+  `detector_carriage_zero`); a broken chain, a transformation that is not a translation along a unit vector, or a
+  length without a length unit is an error. It compares the pixel centres with the calibration recorded in the
   file (`info.calibration`), otherwise with the nominal Geant4 geometry; `-c NAME` selects any calibration.
+- `--decimals N` rounds every value to 10^-N m. A pixel position adds several rounded values (translation, offset,
+  pixel shape), so with the coarsest `--decimals 4` (0.1 mm) it can be off by ~0.11 mm. `info.decimals` records it.
 - `--visualize`: 4 pixels per straw by default, for NeXus-JSON geometry viewers (e.g.
   [jsondisplay](https://github.com/chribe/jsondisplay), which draws the pixel offsets as points).
 - Pixel ids: `bank first id + (tube · 7 + straw) · N + pixel`, with tube = layer · rows + row, as in Geant4 and the ICD.
@@ -222,6 +232,8 @@ Steps 1–4 use the file's entry in `survey_files` (here `SAM606`):
    `WARNING` lines): the two tubes of a bank must be parallel; their distance divided by 28.4 mm must equal the tube id
    difference; each tube's position across the bank must match its assigned id in the nominal geometry; the length
    removed in step 6 must be 20–40 mm (`survey.EXCESS_LENGTH_RANGE`, set for points at the physical tube ends).
+   `loki-pixel-json` and `loki-info` run these checks too when they use a survey calibration, and report failed ones
+   on stderr.
 6. **Adjust the tube ends to the straw length** (`find_effective_tube_ends`): if the distance of the two measured points
    of a tube differs from the effective straw length of the bank, both points are moved symmetrically along the line
    through them (closer or farther) until it matches, i.e. the difference is assumed to be split equally between the

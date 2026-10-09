@@ -42,6 +42,10 @@ Only A[0], A[1], A[2] and B[0] define the model. The corners are checked
     (|layer_step|) are the nominal 28.40 / 27.00 mm within PITCH_TOLERANCE
     (corners of another bank, of the wrong size, or with A[1] / A[2] swapped
     fail this);
+  - the straw length (|B[0] - A[0]|) is the nominal straw length of the bank
+    within CORNER_TOLERANCE (the corners are the straw ends after the trimming of
+    the end electronics: e.g. untrimmed tube ends or pixel-centre corners fail
+    this);
   - the frame (along, row direction, layer direction) is right-handed, as for
     every correctly ordered bank: swapped 'A' / 'B' (first / last pixel ends)
     make it left-handed;
@@ -67,7 +71,9 @@ Pixel reference point (what a pixel offset points to), selectable:
       towards the first pixel end), at k * L / N along the straw.
 The pixel shape in the NeXus output (nexus_json.py) is set accordingly.
 
-Pixel numbering (as in Geant4 and the ICD, 1-based detector_number):
+Pixel numbering (as in Geant4 and the ICD). NOTE: in this module "pixel id" means
+the 1-based detector_number of the NeXus file (the ICD's pixelID), i.e. the 0-based
+Geant4 pixel id + 1 (FIRST_PIXEL_ID = 1):
   pixel_id = bank_first_pixel_id + (tube * 7 + straw) * N + pixel_in_straw
   tube = layer * R + row (layer 0 = front layer, facing the sample).
 
@@ -85,6 +91,7 @@ from .constants import (
     LAYERS_PER_BANK,
     NUMBER_OF_BANKS,
     STRAW_HEXAGON_ROTATION,
+    STRAW_LENGTHS,
     STRAW_POSITIONS_IN_TUBE,
     STRAW_RADIUS,
     STRAW_TABLE_ROTATION_OFFSET,
@@ -203,10 +210,11 @@ class BankFrame:
     rows: int
 
     @classmethod
-    def from_corners(cls, corners, rows, tolerance=CORNER_TOLERANCE):
+    def from_corners(cls, corners, rows, tolerance=CORNER_TOLERANCE, straw_length=None):
         """Build the frame from corners in the REFERENCE_BANKS_DATA format.
         Raises ValueError if the corners fail the checks of the module docstring
-        (tolerance [mm]: the accepted inconsistency of the corners)."""
+        (tolerance [mm]: the accepted inconsistency of the corners; straw_length [mm]:
+        the expected straw length, not checked if None)."""
         a = np.asarray(corners["A"], dtype=float)
         b = np.asarray(corners["B"], dtype=float)
         if a.shape != (4, 3) or b.shape != (4, 3):
@@ -214,6 +222,15 @@ class BankFrame:
         if not (np.all(np.isfinite(a)) and np.all(np.isfinite(b))):
             raise ValueError("corners must be finite numbers")
         straw_vector = b[0] - a[0]
+        if (
+            straw_length is not None
+            and abs(np.linalg.norm(straw_vector) - straw_length) > tolerance
+        ):
+            raise ValueError(
+                f"straw length {np.linalg.norm(straw_vector):.3f} mm (|B[0] - A[0]|) differs from the "
+                f"nominal {straw_length} mm (tolerance {tolerance} mm): corners of untrimmed tube ends "
+                "or of pixel centres?"
+            )
         deviation = max(
             np.abs(a[3] - (a[1] + a[2] - a[0])).max(),
             np.abs((b - a) - straw_vector).max(),
@@ -431,7 +448,7 @@ def compute_bank_pixels(
         raise ValueError(
             f"bank {bank_id}: num_tubes {corners['num_tubes']} != {TUBES_PER_BANK[bank_id]}"
         )
-    frame = BankFrame.from_corners(corners, rows)
+    frame = BankFrame.from_corners(corners, rows, straw_length=STRAW_LENGTHS[bank_id])
     if frame.mirrored != (bank_id in MIRRORED_BANK_IDS):
         raise ValueError(
             f"bank {bank_id}: the corners give a {'mirrored' if frame.mirrored else 'normal'} "

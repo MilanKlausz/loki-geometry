@@ -387,8 +387,27 @@ def test_swapped_back_top_and_front_bottom_corners_are_rejected(bank_id):
 @pytest.mark.parametrize("source, target", [(3, 7), (0, 3), (1, 5)])
 def test_corners_of_another_bank_with_the_same_mirroring_are_rejected(source, target):
     corners = {end: REFERENCE_BANKS_DATA[source][end] for end in "AB"}
-    with pytest.raises(ValueError, match="tube pitches"):
+    with pytest.raises(ValueError, match="tube pitches|straw length"):
         lbp.compute_bank_pixels(target, corners, 2)
+
+
+def _stretched(bank_id, extra_mm):
+    """REFERENCE_BANKS_DATA corners of a bank with the straws longer by extra_mm (both ends)."""
+    a = np.array(REFERENCE_BANKS_DATA[bank_id]["A"], dtype=float)
+    b = np.array(REFERENCE_BANKS_DATA[bank_id]["B"], dtype=float)
+    along = (b[0] - a[0]) / np.linalg.norm(b[0] - a[0])
+    return {"A": a - 0.5 * extra_mm * along, "B": b + 0.5 * extra_mm * along}
+
+
+@pytest.mark.parametrize("bank_id", [2, 3, 5])
+def test_corners_with_the_wrong_straw_length_are_rejected(bank_id):
+    """Untrimmed tube ends (+30 mm), corners at the pixel centres instead of the straw ends
+    (shorter by one pixel, here 512 pixels per straw) and 0.2 mm too long straws are
+    rejected; 0.05 mm (rounding) is accepted."""
+    for extra in (30.0, -c.STRAW_LENGTHS[bank_id] / 512, 0.2, -0.2):
+        with pytest.raises(ValueError, match="straw length"):
+            lbp.compute_bank_pixels(bank_id, _stretched(bank_id, extra), 2)
+    lbp.compute_bank_pixels(bank_id, _stretched(bank_id, 0.05), 2)
 
 
 def test_nan_corner_is_rejected():
@@ -476,3 +495,44 @@ def test_centre_of_mass_is_the_centre_of_the_tube_grid():
 def test_unknown_bank_origin_raises():
     with pytest.raises(ValueError, match="bank_origin must be one of"):
         lbp.compute_bank_pixels(3, REFERENCE_BANKS_DATA[3], 2, bank_origin="bank_centre")
+
+
+def _reference_corners(bank_id):
+    return {end: np.array(REFERENCE_BANKS_DATA[bank_id][end], dtype=float) for end in "AB"}
+
+
+@pytest.mark.parametrize("bank_id", [3, 6])
+def test_corner_tolerance_at_its_limit(bank_id):
+    """A[3] off the model by 0.2 mm is rejected (tolerance 0.1 mm), by 0.05 mm accepted."""
+    for shift, accepted in ((0.05, True), (0.2, False)):
+        corners = _reference_corners(bank_id)
+        corners["A"][3] = corners["A"][3] + shift * np.array([0.0, 0.0, 1.0])
+        if accepted:
+            lbp.compute_bank_pixels(bank_id, corners, 2)
+        else:
+            with pytest.raises(ValueError, match="inconsistent corners"):
+                lbp.compute_bank_pixels(bank_id, corners, 2)
+
+
+@pytest.mark.parametrize("bank_id", [3, 6])
+def test_pitch_tolerance_at_its_limit(bank_id):
+    """The bottom tubes (A[2], A[3], B[2], B[3]) moved so that the tube pitch in a layer is
+    0.3 mm (accepted) or 0.7 mm (rejected, tolerance 0.5 mm) larger than 28.40 mm."""
+    for extra, accepted in ((0.3, True), (0.7, False)):
+        corners = _reference_corners(bank_id)
+        row_step = (corners["A"][2] - corners["A"][0]) / (c.TUBES_PER_LAYER[bank_id] - 1)
+        shift = (c.TUBES_PER_LAYER[bank_id] - 1) * extra * row_step / np.linalg.norm(row_step)
+        for end in "AB":
+            corners[end][2] = corners[end][2] + shift
+            corners[end][3] = corners[end][3] + shift
+        if accepted:
+            lbp.compute_bank_pixels(bank_id, corners, 2)
+        else:
+            with pytest.raises(ValueError, match="tube pitches"):
+                lbp.compute_bank_pixels(bank_id, corners, 2)
+
+
+@pytest.mark.parametrize("pixels_per_straw", [True, False, 0, -1, 2.0, "4"])
+def test_compute_bank_pixels_rejects_bad_pixel_numbers(pixels_per_straw):
+    with pytest.raises(ValueError, match="positive integer"):
+        lbp.compute_bank_pixels(3, REFERENCE_BANKS_DATA[3], pixels_per_straw)

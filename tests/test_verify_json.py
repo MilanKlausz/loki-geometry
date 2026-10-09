@@ -34,19 +34,13 @@ def _own_output(banks, pixels_per_straw=2):
 
 def _as_instrument_file(output):
     """The same groups arranged like a full instrument file (loki.json):
-    /entry/instrument/{detector_carriage/transformations/..., loki_detector_N}."""
-    banks = [node for key, node in output.items() if key.startswith("loki_detector")]
-    instrument = banks
-    if vnj.CARRIAGE_ZERO_NAME in output:
-        transformations = {
-            "name": "transformations",
-            "type": "group",
-            "children": [output[vnj.CARRIAGE_ZERO_NAME]],
-        }
-        carriage = {"name": "detector_carriage", "type": "group", "children": [transformations]}
-        instrument = [carriage] + banks
-    instrument_group = {"name": "instrument", "type": "group", "children": instrument}
-    return {"children": [{"name": "entry", "type": "group", "children": [instrument_group]}]}
+    /entry/instrument/{detector_carriage (with value and transformations), loki_detector_N},
+    the carriage first and without the info of the output."""
+    tree = lnj.instrument_tree({"info": {}, **output})
+    del tree["info"]
+    instrument = tree["children"][0]["children"][0]
+    instrument["children"] = instrument["children"][-1:] + instrument["children"][:-1]
+    return tree
 
 
 def test_round_trip_through_a_file(tmp_path, reference_pixels):
@@ -131,7 +125,7 @@ def test_verify_json_wrong_pixels_per_straw_is_an_error(tmp_path, capsys):
 
 def test_bank_0_without_carriage_is_an_error(tmp_path):
     output = _own_output((0,))
-    del output[vnj.CARRIAGE_ZERO_NAME]
+    del output[lnj.CARRIAGE_ZERO_NAME]
     filename = tmp_path / "pixels.json"
     filename.write_text(json.dumps(output))
     with pytest.raises(ValueError):
@@ -210,7 +204,7 @@ def test_carriage_group_without_transformations_gives_a_clean_error(tmp_path):
     """An instrument file whose detector_carriage has no transformations group:
     bank 0 depends on the carriage, so its translation is missing (ValueError)."""
     output = _output((0,))
-    output.pop(vnj.CARRIAGE_ZERO_NAME)
+    output.pop(lnj.CARRIAGE_ZERO_NAME)
     carriage = {"name": "detector_carriage", "type": "group", "children": []}
     instrument = {
         "name": "instrument",
@@ -218,7 +212,7 @@ def test_carriage_group_without_transformations_gives_a_clean_error(tmp_path):
         "children": [carriage, output["loki_detector_0"]],
     }
     data = {"children": [{"name": "entry", "type": "group", "children": [instrument]}]}
-    with pytest.raises(ValueError, match="detector_carriage_zero"):
+    with pytest.raises(ValueError, match="detector_carriage/value not found"):
         vnj.read_pixel_positions(_write(tmp_path, data))
 
 
@@ -264,6 +258,8 @@ def measured_json(tmp_path_factory):
 
 
 def test_a_file_is_compared_with_its_recorded_calibration(measured_json, capsys):
+    """The calibration recorded in the file is used (a round trip: the same corners and pixel code
+    on both sides; the agreement with Geant4 is tested in test_geometry_info / test_nexus_json)."""
     assert vnj.main([str(measured_json), "--tolerance", "0.001"]) == 0
     out = capsys.readouterr().out
     assert "deviation from the 2026-September-SAM-606 pixel centres" in out
@@ -291,3 +287,147 @@ def test_the_calibration_option_overrides_the_file(measured_json, capsys):
         vnj.main([str(measured_json), "-c", "unknown"])
     assert error.value.code == 2
     assert "unknown calibration" in capsys.readouterr().err
+
+
+# ---- the depends_on chain (as in the instrument file, the file to verify after the update) ----
+
+
+def _tree(banks, n=2):
+    return lnj.instrument_tree(_output(banks, n))
+
+
+def _node(tree, path):
+    return vnj.node_index(tree)[path]
+
+
+def _set_attribute(node, name, value):
+    for attribute in node.setdefault("attributes", []):
+        if attribute["name"] == name:
+            attribute["values"] = value
+            return
+    node["attributes"].append({"name": name, "values": value})
+
+
+TRANS_2 = "/entry/instrument/loki_detector_1/transformations/trans_2"
+CARRIAGE_VALUE = "/entry/instrument/detector_carriage/value"
+
+
+def _depends_on_dataset(tree, bank):
+    return vnj._child(_node(tree, f"/entry/instrument/loki_detector_{bank}"), "depends_on")
+
+
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        (
+            lambda t: _set_attribute(_node(t, TRANS_2), "transformation_type", "rotation"),
+            "only translations",
+        ),
+        (
+            lambda t: _set_attribute(_node(t, TRANS_2), "vector", [0.0, 0.0, 2.0]),
+            "not a unit vector",
+        ),
+        (lambda t: _set_attribute(_node(t, TRANS_2), "units", "s"), "not a length unit"),
+        (lambda t: _set_attribute(_node(t, TRANS_2), "depends_on", TRANS_2), "loops"),
+        (
+            lambda t: _node(t, TRANS_2)["attributes"].remove(
+                next(a for a in _node(t, TRANS_2)["attributes"] if a["name"] == "depends_on")
+            ),
+            "has no depends_on",
+        ),
+        (
+            lambda t: _depends_on_dataset(t, 1)["config"].update(values=TRANS_2 + "x"),
+            "not found",
+        ),
+        (
+            lambda t: t["children"][0]["children"][0]["children"].append(
+                json.loads(json.dumps(_node(t, "/entry/instrument/loki_detector_1")))
+            ),
+            "two nodes",
+        ),
+    ],
+)
+def test_a_broken_transformation_chain_is_an_error(tmp_path, change, message):
+    tree = _tree((0, 1, 2))
+    change(tree)
+    with pytest.raises(ValueError, match=message):
+        vnj.read_pixel_positions(_write(tmp_path, tree))
+
+
+@pytest.mark.parametrize(
+    "change, banks_off",
+    [
+        # the translation in mm instead of m: 3 mm from the sample instead of 3 m
+        (lambda t: _set_attribute(_node(t, TRANS_2), "units", "mm"), {1}),
+        # bank 2 placed by the translation of bank 1
+        (lambda t: _depends_on_dataset(t, 2)["config"].update(values=TRANS_2), {2}),
+        # the carriage position does not depend on detector_carriage_zero
+        (lambda t: _set_attribute(_node(t, CARRIAGE_VALUE), "depends_on", "."), {0}),
+        # the carriage moved by 100 mm
+        (
+            lambda t: _node(t, CARRIAGE_VALUE + "/value")["config"].update(values=100.0),
+            {0},
+        ),
+    ],
+)
+def test_a_wrong_transformation_chain_shows_as_a_deviation(tmp_path, capsys, change, banks_off):
+    tree = _tree((0, 1, 2))
+    change(tree)
+    assert vnj.main([_write(tmp_path, tree), "-c", "nominal-geant4-geometry"]) == 1
+    flagged = {
+        int(line.split()[1].rstrip(":"))
+        for line in capsys.readouterr().out.splitlines()
+        if "> tolerance" in line
+    }
+    assert flagged == banks_off
+
+
+def test_swapped_pixel_ids_in_a_bank_are_an_error(tmp_path):
+    output = _output((3,))
+    ids = vnj._child(output["loki_detector_3"], "detector_number")["config"]["values"]
+    ids[5], ids[6] = ids[6], ids[5]
+    with pytest.raises(SystemExit):
+        vnj.main([_write(tmp_path, output), "-c", "nominal-geant4-geometry"])
+
+
+def test_the_deviation_is_the_3d_distance(tmp_path, capsys):
+    """Offsets shifted by (1, 1, 1) mm: the reported deviation is sqrt(3) mm."""
+    output = _output((3,))
+    for axis in "xyz":
+        offsets = vnj._child(output["loki_detector_3"], f"{axis}_pixel_offset")["config"]
+        offsets["values"] = [v + 0.001 for v in offsets["values"]]
+    assert vnj.main([_write(tmp_path, output), "-c", "nominal-geant4-geometry"]) == 1
+    assert "largest 1.7321" in capsys.readouterr().out
+
+
+def test_ignore_pixel_shape_on_the_command_line(tmp_path, capsys):
+    """A pixel_base file: with the pixel shape the positions agree; without it
+    (--ignore-pixel-shape) they are half a pixel off (bank 3: 1000 mm / 4 pixels -> 125 mm)."""
+    filename = str(tmp_path / "base.json")
+    with contextlib.redirect_stdout(io.StringIO()):
+        lnj.main(
+            [
+                "-o",
+                filename,
+                "--pixels-per-straw",
+                "4",
+                "--banks",
+                "3",
+                "--pixel-reference",
+                "pixel_base",
+            ]
+        )
+    assert vnj.main([filename]) == 0
+    assert "largest 0.0000" in capsys.readouterr().out
+    assert vnj.main([filename, "--ignore-pixel-shape", "--tolerance", "200"]) == 0
+    assert "largest 125.0000" in capsys.readouterr().out
+
+
+def test_a_file_with_the_nodes_at_the_top_level_can_still_be_read(tmp_path, reference_pixels):
+    """The layout of older loki-pixel-json versions (the nodes at the top level)."""
+    filename = tmp_path / "old.json"
+    filename.write_text(json.dumps(lnj.build_output(reference_pixels, "test")))
+    banks = vnj.read_pixel_positions(filename)
+    assert sorted(banks) == list(range(9))
+    for bank_id, (_, positions) in banks.items():
+        assert np.abs(positions - reference_pixels[bank_id].positions).max() < 1e-4

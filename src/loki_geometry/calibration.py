@@ -51,8 +51,9 @@ measured physical tube ends include ~15 mm of end electronics at both ends, the
 Geant4 end pixel centres are half a pixel inside): the algorithm only uses the
 midpoint and the direction of each tube, which such errors do not change. The
 nominal (effective) straw length of the bank is used for the tube length.
-The input is checked (ValueError): exactly 2 tubes per bank and each bank
-once, the two tube ids must differ, the two tubes must point the same way, and
+The input is checked (ValueError): the bank ids are 0-8 and each bank appears
+once, exactly 2 tubes per bank with tube ids of the front layer of that bank
+(0 .. tubes per layer - 1), the two tube ids must differ, the two tubes must point the same way, and
 the layer normal must point away from the sample (swapped first / last pixel
 ends, or survey data in a mirrored frame, would put the back layers in front).
 
@@ -156,6 +157,12 @@ class Detectors:
         self.banks = {}
         for calibration_bank_data in calibration_data:
             bank_id = calibration_bank_data["bank_id"]
+            if (
+                not isinstance(bank_id, (int, np.integer))
+                or isinstance(bank_id, bool)
+                or not 0 <= bank_id < len(self.tubes_per_layer_by_bank)
+            ):
+                raise ValueError(f"unknown bank id {bank_id!r} in the calibration data")
             if bank_id in self.banks:
                 raise ValueError(f"bank {bank_id} appears twice in the calibration data")
             self.banks[bank_id] = Bank(
@@ -564,6 +571,17 @@ class Bank:
                 f"bank {self.bank_id}: exactly 2 input tubes are needed, "
                 f"got {len(calibration_bank_data['positions'])}"
             )
+        for tube in calibration_bank_data["positions"]:
+            tube_id = tube["tube_id"]
+            if (
+                not isinstance(tube_id, (int, np.integer))
+                or isinstance(tube_id, bool)
+                or not 0 <= tube_id < self.tubes_per_layer
+            ):
+                raise ValueError(
+                    f"bank {self.bank_id}: input tube id {tube_id!r} is not a front layer tube "
+                    f"(0 .. {self.tubes_per_layer - 1})"
+                )
         tube_a, tube_b = sorted(calibration_bank_data["positions"], key=lambda pos: pos["tube_id"])
         if tube_a["tube_id"] == tube_b["tube_id"]:
             raise ValueError(
@@ -852,6 +870,8 @@ def main(argv=None):
             provenance.append(f"  (content SHA-256 {entry.checksum})")
         if entry.description:
             provenance += textwrap.wrap(entry.description, 88)
+        for bank_id, note in sorted(entry.bank_notes.items()):
+            provenance += textwrap.wrap(f"Bank {bank_id}: {note}.", 88)
 
     if args.geant4_calibration_file is not None:
         if calibration_name is None:

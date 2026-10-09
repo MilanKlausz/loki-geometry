@@ -62,7 +62,6 @@ import io
 import os
 import sys
 from dataclasses import dataclass
-from functools import lru_cache
 
 import numpy as np
 
@@ -101,10 +100,31 @@ def _survey_corners(calibration):
     from .survey_files import SURVEY_FILES
 
     entry = next(e for e in SURVEY_FILES.values() if e.calibration_name == calibration)
-    with contextlib.redirect_stdout(io.StringIO()):
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
         data = get_measured_calibration_data(entry.path, verbose=False)
         detectors = Detectors(data, True, intended=None, run_checks=False)
+    _report_survey_warnings(calibration, output.getvalue())
     return detectors.formatted_data(as_straw_ends=True, decimals=None)
+
+
+_reported_survey_warnings = set()
+
+
+def _report_survey_warnings(calibration, survey_output):
+    """The failed survey checks (the WARNING lines of the survey output, which is not shown
+    otherwise) on stderr, once per calibration and set of warnings."""
+    warnings = tuple(line.strip() for line in survey_output.splitlines() if "WARNING" in line)
+    if not warnings or (calibration, warnings) in _reported_survey_warnings:
+        return
+    _reported_survey_warnings.add((calibration, warnings))
+    print(
+        f"WARNING: {len(warnings)} survey check(s) of the calibration {calibration} failed (the "
+        "geometry may be wrong; run loki-survey for the details):",
+        file=sys.stderr,
+    )
+    for line in warnings:
+        print(f"    {line}", file=sys.stderr)
 
 
 def calibration_corners(calibration=DEFAULT_CALIBRATION, rear_detector_distance=None):
@@ -159,7 +179,9 @@ def calibration_bank_sources(calibration=DEFAULT_CALIBRATION):
 
 def _rear_bank_at(corners, distance):
     """The rear bank corners moved along z so that the z of the front face centre is distance."""
-    frame = lbp.BankFrame.from_corners(corners, lbp.tubes_per_layer(0))
+    frame = lbp.BankFrame.from_corners(
+        corners, lbp.tubes_per_layer(0), straw_length=c.STRAW_LENGTHS[0]
+    )
     shift = np.array([0.0, 0.0, distance - _front_face_centre(frame)[2]])
     moved = {
         key: [tuple(float(v) for v in np.asarray(p) + shift) for p in corners[key]] for key in "AB"
@@ -249,8 +271,11 @@ class LokiGeometry:
         self.pixels_per_straw = int(pixels_per_straw)
         self.rear_detector_distance = rear_detector_distance
         self.corners = calibration_corners(calibration, rear_detector_distance)
+        self._bank_pixels_cache = {}  # bank id -> BankPixels (computed when needed)
         self._frames = {
-            b: lbp.BankFrame.from_corners(self.corners[b], lbp.tubes_per_layer(b))
+            b: lbp.BankFrame.from_corners(
+                self.corners[b], lbp.tubes_per_layer(b), straw_length=c.STRAW_LENGTHS[b]
+            )
             for b in c.BANK_IDS
         }
         self._first_ids = [
@@ -357,15 +382,14 @@ class LokiGeometry:
 
     def _bank_pixels(self, bank_id):
         self._check_bank(bank_id)
-        return _cached_bank_pixels(self, bank_id)
+        if bank_id not in self._bank_pixels_cache:
+            self._bank_pixels_cache[bank_id] = lbp.compute_bank_pixels(
+                bank_id, self.corners[bank_id], self.pixels_per_straw
+            )
+        return self._bank_pixels_cache[bank_id]
 
     def _check_bank(self, bank_id):
         _check_index("bank id", bank_id, c.NUMBER_OF_BANKS)
-
-
-@lru_cache(maxsize=16)
-def _cached_bank_pixels(geometry, bank_id):
-    return lbp.compute_bank_pixels(bank_id, geometry.corners[bank_id], geometry.pixels_per_straw)
 
 
 def _check_index(name, value, size):
@@ -442,7 +466,8 @@ def main(argv=None):
         "--rear-detector-distance",
         type=float,
         default=None,
-        help="sample to rear bank front face distance [mm] (default: as in the calibration)",
+        help="the z of the front face centre of the rear bank [mm], i.e. the rear detector distance "
+        "(default: as in the calibration)",
     )
     query = parser.add_mutually_exclusive_group()
     query.add_argument("-p", "--pixel", type=int, help="a pixel by its 0-based pixel id (Geant4)")

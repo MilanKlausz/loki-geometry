@@ -93,7 +93,9 @@ from .constants import BANK_IDS, DEFAULT_PIXELS_PER_STRAW, STRAW_RADIUS
 MM_TO_M = 1e-3
 LENGTH_UNIT = "m"
 DEFAULT_DECIMALS = 8  # rounding of the coordinates in [m] (1e-8 m = 10 nm)
-MIN_DECIMALS = 4  # coarsest accepted rounding (1e-4 m = 0.1 mm)
+# coarsest accepted rounding (1e-4 m = 0.1 mm per value; a pixel position adds several rounded values: the
+# translation, the offsets and the pixel shape, so it can be off by somewhat more, ~0.11 mm)
+MIN_DECIMALS = 4
 INSTRUMENT_PATH = "/entry/instrument"
 CARRIAGE_BANK_ID = 0  # the bank on the moving detector carriage
 CARRIAGE_ZERO_NAME = "detector_carriage_zero"
@@ -275,10 +277,14 @@ def build_output(instrument_pixels, corners_source, decimals=DEFAULT_DECIMALS, c
                 BANK_ORIGIN_DESCRIPTIONS[origin]
                 for origin in sorted({bp.bank_origin for bp in instrument_pixels.values()})
             ),
-            "carriage_bank": f"{bank_name(CARRIAGE_BANK_ID)} translation = {CARRIAGE_ZERO_NAME} "
-            f"(in {INSTRUMENT_PATH}/detector_carriage/transformations)",
+            "decimals": decimals,
         }
     }
+    if CARRIAGE_BANK_ID in instrument_pixels:
+        output["info"]["carriage_bank"] = (
+            f"{bank_name(CARRIAGE_BANK_ID)} translation = {CARRIAGE_ZERO_NAME} "
+            f"(in {INSTRUMENT_PATH}/detector_carriage/transformations)"
+        )
     for bank_id, bank_pixels in instrument_pixels.items():
         output[bank_name(bank_id)] = bank_group(bank_pixels, decimals)
         if bank_id == CARRIAGE_BANK_ID:
@@ -371,7 +377,9 @@ def calibration_corners(calibration):
 def _decimals(text):
     value = int(text)
     if value < MIN_DECIMALS:
-        raise argparse.ArgumentTypeError(f"must be at least {MIN_DECIMALS} (0.1 mm), not {text}")
+        raise argparse.ArgumentTypeError(
+            f"must be at least {MIN_DECIMALS} (0.1 mm per value), not {text}"
+        )
     return value
 
 
@@ -416,7 +424,8 @@ def main(argv=None):
         "--decimals",
         type=_decimals,
         default=DEFAULT_DECIMALS,
-        help=f"rounding of the coordinates in [m], at least {MIN_DECIMALS} (default: {DEFAULT_DECIMALS})",
+        help=f"rounding of the values in [m] (decimals), at least {MIN_DECIMALS} (default: {DEFAULT_DECIMALS}); "
+        "a pixel position adds several rounded values, so it can be off by somewhat more than the rounding",
     )
     parser.add_argument(
         "--banks",
@@ -454,14 +463,20 @@ def main(argv=None):
         parser.error(str(error))
     if args.banks is not None:
         corners = {bank_id: corners[bank_id] for bank_id in args.banks}
-    instrument_pixels = compute_instrument_pixels(
-        corners,
-        args.pixels_per_straw,
-        pixel_reference=args.pixel_reference,
-        bank_origin=args.bank_origin,
-    )
+    try:
+        instrument_pixels = compute_instrument_pixels(
+            corners,
+            args.pixels_per_straw,
+            pixel_reference=args.pixel_reference,
+            bank_origin=args.bank_origin,
+        )
+    except ValueError as error:
+        parser.error(f"calibration {args.calibration}: {error}")
     output = build_output(instrument_pixels, sources, args.decimals, calibration=args.calibration)
-    write_json(instrument_tree(output), args.output)
+    try:
+        write_json(instrument_tree(output), args.output)
+    except OSError as error:
+        parser.error(f"cannot write {args.output}: {error.strerror or error}")
     total = sum(len(bp.pixel_ids) for bp in instrument_pixels.values())
     print(
         f"Written {args.output}: calibration {args.calibration}, {len(instrument_pixels)} banks, {total} pixels, "

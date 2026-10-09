@@ -16,8 +16,8 @@ from .reference_data import REFERENCE_BANKS_DATA
 
 
 def _signed_tilt(bank_id):
-    """Counterclockwise tilt rotation of a bank [rad] (around x for horizontal,
-    around -y for vertical banks)."""
+    """Counterclockwise tilt rotation of a bank [rad] (around +x for horizontal,
+    around +y for vertical banks)."""
     sign = c.bank_position_side(bank_id) * (1 if bank_id in c.VERTICAL_BANK_IDS else -1)
     return m.radians(sign * c.bank_tilt_angle(bank_id))
 
@@ -97,13 +97,12 @@ class Bank:
     def _apply_bank_tilt(self):
         """Applies the tilt rotation to the bank."""
         if self.isVerticalBank:
-            # Rotate anticlockwise around the -Y axis (equivalent to clockwise around +Y)
-            # This is a clockwise rotation around +Y by bankTiltAngle[bankId].
-            # A clockwise rotation by angle 'a' is a CCW rotation by '-a'.
+            # Rotate counterclockwise around the +Y axis by the (signed) tilt angle: the points are
+            # row vectors, so they are multiplied by the transpose of the standard rotation matrix
             y_tilt_matrix_standard = Bank.rotation_matrix(self.BANK_TILT_ANGLES[self.bankId], "y")
             rotation_matrix_to_apply = y_tilt_matrix_standard.T
         else:
-            # Rotate counterclockwise around the +X axis
+            # Rotate counterclockwise around the +X axis by the (signed) tilt angle (as above)
             x_tilt_matrix_standard = Bank.rotation_matrix(self.BANK_TILT_ANGLES[self.bankId], "x")
             rotation_matrix_to_apply = x_tilt_matrix_standard.T
 

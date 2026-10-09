@@ -295,3 +295,55 @@ def test_a_frame_must_return_three_finite_numbers(register, tmp_path, result):
     register(sf.SurveyFile("frame.txt", SAM606.label_map, frame=lambda point: result))
     with pytest.raises(ValueError, match="expected 3 finite numbers"):
         survey.get_measured_calibration_data(str(path), verbose=False)
+
+
+def _survey_output(register, tmp_path, points, name):
+    path = _write(tmp_path / name, points)
+    register(sf.SurveyFile(name, sf.SAM606.label_map))
+    with contextlib.redirect_stdout(io.StringIO()) as output:
+        survey.get_measured_calibration_data(str(path), verbose=False)
+    return output.getvalue()
+
+
+@pytest.mark.parametrize("pitches, warned", [(0.1, False), (0.4, True)])
+def test_tube_id_check_at_its_limit(register, tmp_path, pitches, warned):
+    """Bank 3 tube C2DP16 (id 15) moved across the tubes by 0.1 / 0.4 pitch: only the second is
+    reported (tolerance 0.25 pitch)."""
+    points = _nexus_points()
+    for end in ("I", "II"):
+        points[f"C2DP16{end}"] = points[f"C2DP16{end}"] + np.array(
+            [0.0, -pitches * c.TUBE_GRID_SIDE, 0.0]
+        )
+    out = _survey_output(register, tmp_path, points, "moved.txt")
+    assert ("C2DP16 : estimated" in out and "WARNING: mismatch!" in out) == warned
+
+
+def _stretched_tube(points, label, extra_mm):
+    first, last = (
+        np.array(points[f"{label}I"], dtype=float),
+        np.array(points[f"{label}II"], dtype=float),
+    )
+    direction = (last - first) / np.linalg.norm(last - first)
+    points[f"{label}I"] = first - 0.5 * extra_mm * direction
+    points[f"{label}II"] = last + 0.5 * extra_mm * direction
+
+
+@pytest.mark.parametrize("extra, warned", [(0.0, False), (25.0, True), (-50.0, True)])
+def test_extra_length_check(register, tmp_path, extra, warned):
+    """The measured tubes are ~30 mm longer than the straws (end electronics): 25 mm more, or 50
+    mm less, is outside the expected 20-40 mm and reported."""
+    points = _nexus_points()
+    _stretched_tube(points, "C2DP16", extra)
+    out = _survey_output(register, tmp_path, points, "stretched.txt")
+    assert ("C2DP16 : measured" in out and "WARNING: unexpected extra length!" in out) == warned
+
+
+def test_a_tube_shorter_than_half_the_straw_length_is_rejected(register, tmp_path):
+    """Bank 3 has 1000 mm straws: a 450 mm tube is rejected, a 600 mm one only reported."""
+    points = _nexus_points()
+    length = np.linalg.norm(np.array(points["C2DP16II"]) - np.array(points["C2DP16I"]))
+    _stretched_tube(points, "C2DP16", 600.0 - length)
+    assert "unexpected extra length" in _survey_output(register, tmp_path, points, "short.txt")
+    _stretched_tube(points, "C2DP16", -150.0)
+    with pytest.raises(ValueError, match="450.0 mm long"):
+        _survey_output(register, tmp_path, points, "shorter.txt")
