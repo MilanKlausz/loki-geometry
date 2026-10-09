@@ -1,0 +1,4 @@
+# the built documentation
+build/
+# pages generated from the README and the command-line tools by source/conf.py at each build
+source/generated/
