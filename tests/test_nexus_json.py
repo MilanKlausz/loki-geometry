@@ -605,17 +605,82 @@ def test_main_writes_the_instrument_tree(tmp_path):
     assert sorted(banks) == [0, 5]
 
 
-def test_visualize_writes_4_pixels_per_straw(tmp_path):
-    """--visualize: the same file with 4 pixels per straw (for geometry viewers)."""
+def _positions_from_local_transformations(tree):
+    """{bank_id: pixel positions [mm]} as a viewer that follows only the translations inside each
+    group (as jsondisplay; a depends_on elsewhere counts as no translation)."""
+    positions = {}
+    for node in tree["children"][0]["children"][0]["children"]:
+        if not node["name"].startswith("loki_detector_"):
+            continue
+        datasets = {
+            c["config"]["name"]: c["config"]["values"]
+            for c in node["children"]
+            if c.get("module") == "dataset"
+        }
+        local = {}
+        for child in node["children"]:
+            if child.get("name") == "transformations":
+                for t in child["children"]:
+                    attributes = {a["name"]: a["values"] for a in t["attributes"]}
+                    local[t["config"]["name"]] = (t["config"]["values"], attributes)
+        translation, name = np.zeros(3), datasets["depends_on"].split("/")[-1]
+        while name in local:
+            value, attributes = local[name]
+            assert attributes["transformation_type"] == "translation"
+            translation += value * np.array(attributes["vector"])
+            name = attributes["depends_on"].split("/")[-1]
+        offsets = np.column_stack([datasets[f"{axis}_pixel_offset"] for axis in "xyz"])
+        positions[int(node["name"].split("_")[-1])] = (offsets + translation) * 1000.0
+    return positions
+
+
+def test_visualize_writes_4_pixels_per_straw_and_bank_0_without_the_carriage(tmp_path):
+    """--visualize: 4 pixels per straw (for geometry viewers); banks 1-8 as in the normal output,
+    bank 0 placed by its own detector_carriage_zero (no detector carriage), so that a viewer that
+    follows only the transformations inside a group places every bank right."""
     with contextlib.redirect_stdout(io.StringIO()):
-        lnj.main(["-o", str(tmp_path / "view.json"), "--visualize", "--banks", "1", "5"])
+        lnj.main(["-o", str(tmp_path / "view.json"), "--visualize", "--banks", "0", "1", "5"])
         lnj.main(
-            ["-o", str(tmp_path / "plain.json"), "--pixels-per-straw", "4", "--banks", "1", "5"]
+            [
+                "-o",
+                str(tmp_path / "plain.json"),
+                "--pixels-per-straw",
+                "4",
+                "--banks",
+                "0",
+                "1",
+                "5",
+            ]
         )
     view = json.loads((tmp_path / "view.json").read_text())
     plain = json.loads((tmp_path / "plain.json").read_text())
-    assert view["children"] == plain["children"]
     assert view["info"]["pixels_per_straw"] == 4
+    view_nodes = {n["name"]: n for n in view["children"][0]["children"][0]["children"]}
+    plain_nodes = {n["name"]: n for n in plain["children"][0]["children"][0]["children"]}
+    assert set(view_nodes) == {"loki_detector_0", "loki_detector_1", "loki_detector_5"}
+    assert "detector_carriage" in plain_nodes
+    for name in ("loki_detector_1", "loki_detector_5"):
+        assert view_nodes[name] == plain_nodes[name]
+    depends_on = [
+        c
+        for c in view_nodes["loki_detector_0"]["children"]
+        if c.get("config", {}).get("name") == "depends_on"
+    ]
+    assert [c["config"]["values"] for c in depends_on] == [
+        f"{lnj.INSTRUMENT_PATH}/loki_detector_0/transformations/{lnj.CARRIAGE_ZERO_NAME}"
+    ]
+    # the same positions (loki-geometry reader), and also for a viewer without links between groups
+    view_banks = vnj.read_pixel_positions(tmp_path / "view.json")
+    plain_banks = vnj.read_pixel_positions(tmp_path / "plain.json")
+    local = _positions_from_local_transformations(view)
+    for bank_id in (0, 1, 5):
+        np.testing.assert_array_equal(view_banks[bank_id][0], plain_banks[bank_id][0])
+        np.testing.assert_allclose(view_banks[bank_id][1], plain_banks[bank_id][1], atol=1e-9)
+        np.testing.assert_allclose(local[bank_id], plain_banks[bank_id][1], atol=1e-6)
+    # the normal output is not usable that way for bank 0 (the reason for the change)
+    assert (
+        np.abs(_positions_from_local_transformations(plain)[0] - plain_banks[0][1]).max() > 1000.0
+    )
 
 
 def test_main_reports_errors_cleanly(tmp_path, capsys):

@@ -187,7 +187,9 @@ loki-verify-json path/to/loki.json --ignore-pixel-shape            # offsets onl
 - `--decimals N` rounds every value to 10^-N m. A pixel position adds several rounded values (translation, offset,
   pixel shape), so with the coarsest `--decimals 4` (0.1 mm) it can be off by ~0.11 mm. `info.decimals` records it.
 - `--visualize`: 4 pixels per straw by default, for NeXus-JSON geometry viewers (e.g.
-  [jsondisplay](https://github.com/chribe/jsondisplay), which draws the pixel offsets as points).
+  [jsondisplay](https://github.com/chribe/jsondisplay), which draws the pixel offsets as points). Bank 0 is placed by
+  its own copy of `detector_carriage_zero` instead of the detector carriage (same positions), because such viewers
+  follow only the transformations inside a group. Not for the instrument file.
 - Pixel ids: `bank first id + (tube · 7 + straw) · N + pixel`, with tube = layer · rows + row, as in Geant4 and the ICD.
 - Checks (all in `tests/`):
   - With the default calibration (the SAM-606 survey), the pixel positions read back from the file equal the pixel

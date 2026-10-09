@@ -60,7 +60,10 @@ detector_carriage_zero dataset into it (see the README).
 
 --visualize: a file for a look at the geometry with NeXus-JSON geometry viewers
 (e.g. https://github.com/chribe/jsondisplay): 4 pixels per straw unless
---pixels-per-straw is given (the pixel offsets are drawn as points).
+--pixels-per-straw is given (the pixel offsets are drawn as points). Bank 0 is placed
+by its own transformations/detector_carriage_zero (the same positions) instead of the
+detector carriage, which is not written: viewers that follow only the transformations
+inside a group (as jsondisplay) place it correctly. Not for the instrument file.
 
 Usage:
   loki-pixel-json -o loki_detector_pixels.json [--calibration NAME] [--pixels-per-straw 256]
@@ -321,16 +324,48 @@ def carriage_group(carriage_zero):
     )
 
 
-def instrument_tree(output):
-    """The nodes of an output dictionary (build_output) in the instrument tree that is written
-    to the file (see the module docstring)."""
-    info = dict(output["info"])
-    info["layout"] = (
-        f"the loki_detector_<id> groups in {INSTRUMENT_PATH}, and the detector carriage of bank 0 "
-        f"({CARRIAGE_ZERO_PATH}), as in the instrument file"
+def carriage_bank_for_viewers(bank, carriage_zero):
+    """Bank 0 placed by its own copy of detector_carriage_zero (--visualize, see the module
+    docstring) instead of depending on the detector carriage."""
+    name = bank["name"]
+    children = [
+        child for child in bank["children"] if child.get("config", {}).get("name") != "depends_on"
+    ]
+    children.append(group("transformations", [carriage_zero], "NXtransformations"))
+    children.append(
+        dataset(
+            "depends_on", f"{INSTRUMENT_PATH}/{name}/transformations/{CARRIAGE_ZERO_NAME}", "string"
+        )
     )
-    children = [node for name, node in output.items() if name.startswith("loki_detector_")]
-    if CARRIAGE_ZERO_NAME in output:
+    return {**bank, "children": children}
+
+
+def instrument_tree(output, visualize=False):
+    """The nodes of an output dictionary (build_output) in the instrument tree that is written
+    to the file (see the module docstring); visualize: bank 0 for viewers (--visualize)."""
+    info = dict(output["info"])
+    carriage_bank = bank_name(CARRIAGE_BANK_ID)
+    if visualize:
+        info["layout"] = (
+            f"the loki_detector_<id> groups in {INSTRUMENT_PATH}; for viewers (--visualize): "
+            f"{carriage_bank} is placed by its own {CARRIAGE_ZERO_NAME}, without the detector carriage"
+        )
+        if carriage_bank in output:
+            info["carriage_bank"] = (
+                f"{carriage_bank} translation = {CARRIAGE_ZERO_NAME} (in its own transformations)"
+            )
+    else:
+        info["layout"] = (
+            f"the loki_detector_<id> groups in {INSTRUMENT_PATH}, and the detector carriage of bank 0 "
+            f"({CARRIAGE_ZERO_PATH}), as in the instrument file"
+        )
+    children = []
+    for name, node in output.items():
+        if name == carriage_bank and visualize:
+            children.append(carriage_bank_for_viewers(node, output[CARRIAGE_ZERO_NAME]))
+        elif name.startswith("loki_detector_"):
+            children.append(node)
+    if CARRIAGE_ZERO_NAME in output and not visualize:
         children.append(carriage_group(output[CARRIAGE_ZERO_NAME]))
     instrument = group("instrument", children, "NXinstrument")
     return {"info": info, "children": [group("entry", [instrument], "NXentry")]}
@@ -474,7 +509,7 @@ def main(argv=None):
         parser.error(f"calibration {args.calibration}: {error}")
     output = build_output(instrument_pixels, sources, args.decimals, calibration=args.calibration)
     try:
-        write_json(instrument_tree(output), args.output)
+        write_json(instrument_tree(output, args.visualize), args.output)
     except OSError as error:
         parser.error(f"cannot write {args.output}: {error.strerror or error}")
     total = sum(len(bp.pixel_ids) for bp in instrument_pixels.values())
