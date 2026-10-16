@@ -117,13 +117,13 @@ def test_console_scripts_point_to_callables():
 
 def test_package_data_is_present_and_complete():
     """Every registered survey file is installed with the package (package data), and
-    the SAM-606 file has the 32 points of the README: 2 tubes x 2 ends, banks 1-8."""
+    the SAM-606 file has the 36 points of the README: 2 tubes x 2 ends, all 9 banks."""
     package_dir = os.path.dirname(loki_geometry.__file__)
     for entry in survey_files.SURVEY_FILES.values():
         assert os.path.isfile(os.path.join(package_dir, "data", entry.file_name))
         assert entry.file_name.endswith(".txt")  # the package data pattern
     points = survey.read_measured_points(SAM606.path)
-    assert len(points) == 32
+    assert len(points) == 36
     assert re.search(r'loki_geometry\s*=\s*\["data/\*\.txt"\]', read(PYPROJECT))
 
 
@@ -184,7 +184,7 @@ def test_readme_python_snippet_runs(capsys):
     namespace = {}
     exec(compile(snippet, "README.md", "exec"), namespace)
     assert namespace["x"] == pytest.approx(498.046875)  # pixel 425472 of _SB_LOKI_INFO_REFERENCE
-    assert sorted(namespace["corners"]) == list(range(1, 9))
+    assert sorted(namespace["corners"]) == list(range(9))
     assert sorted(namespace["pixels"]) == list(range(9))
     assert "Corner positions compared to intended" in capsys.readouterr().out
 

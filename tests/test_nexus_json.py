@@ -320,7 +320,7 @@ def test_loki_json_pixel_shape_is_shifted_by_half_a_pixel(pixels_512, bank_id):
 
 @pytest.fixture(scope="module")
 def measured_corners():
-    """Corners calibrated from the package survey (banks 1-8; bank 0 was not measured)."""
+    """Corners calibrated from the package survey (all 9 banks)."""
     with contextlib.redirect_stdout(io.StringIO()):
         data = survey.get_measured_calibration_data(SAM606.path, verbose=False)
         detectors = calibration.Detectors(data, True, run_checks=False)
@@ -328,9 +328,10 @@ def measured_corners():
 
 
 def test_measured_corners_json_without_bank_0(tmp_path, measured_corners):
-    """Measured data lacks bank 0: no detector_carriage_zero, global ids kept,
-    and the JSON reproduces the model positions."""
-    pixels = lbp.compute_instrument_pixels(measured_corners, 2)
+    """Measured data without bank 0 (e.g. a survey of banks 1-8): no detector_carriage_zero,
+    global ids kept, and the JSON reproduces the model positions."""
+    corners = {bank_id: v for bank_id, v in measured_corners.items() if bank_id != 0}
+    pixels = lbp.compute_instrument_pixels(corners, 2)
     output = lnj.build_output(pixels, "measured")
     assert lnj.CARRIAGE_ZERO_NAME not in output
     assert lnj.bank_name(0) not in output
@@ -382,12 +383,20 @@ def test_main_bank_subset_keeps_the_global_pixel_ids(tmp_path):
     assert lnj.CARRIAGE_ZERO_NAME not in data
 
 
-def test_main_writes_the_carriage_zero_with_bank_0(tmp_path):
-    data = run_main(tmp_path, "--pixels-per-straw", "1", "--banks", "0")
+def test_main_writes_the_carriage_zero_with_bank_0(tmp_path, measured_corners):
+    """detector_carriage_zero is the bank 0 position (its corner A[0]) of the calibration: the
+    CAD geometry, or the survey (bank 0 at the carriage zero position, see carriage_position)."""
+    data = run_main(
+        tmp_path, "--pixels-per-straw", "1", "--banks", "0", "-c", "nominal-cad-geometry"
+    )
     assert np.allclose(
         vnj.translation_mm(data[lnj.CARRIAGE_ZERO_NAME]), REFERENCE_BANKS_DATA[0]["A"][0]
     )
     assert child(data["loki_detector_0"], "transformations") is None
+    data = run_main(tmp_path, "--pixels-per-straw", "1", "--banks", "0")
+    assert np.allclose(
+        vnj.translation_mm(data[lnj.CARRIAGE_ZERO_NAME]), measured_corners[0]["A"][0], atol=0.01
+    )
 
 
 def test_main_default_is_pixel_centre_and_256_pixels(tmp_path):
@@ -509,14 +518,15 @@ def default_json(tmp_path_factory):
 def test_the_default_output_is_the_measured_geometry(default_json):
     """Survey -> calibration -> JSON: the pixel positions of the file (translation + offset +
     pixel shape centre, read back like a NeXus reader) equal the Geant4 pixel centres with the
-    same calibration (G4GeoLoki, hard-coded) for the surveyed banks 1-8, within the rounding of
-    the file (8 decimals in m)."""
+    same calibration (G4GeoLoki, hard-coded) for banks 1-8, within the rounding of the file (8
+    decimals in m). (Bank 0: the file has it at its carriage zero position, Geant4 at the rear
+    detector distance; test_geometry_info compares it at the same distance.)"""
     banks = vnj.read_pixel_positions(str(default_json))
     checked = 0
     for pixel_id, expected in GEANT4_SAM606_PIXELS.items():
         bank_id = max(b for b in ALL_BANKS if lbp.bank_first_pixel_id(b) - 1 <= pixel_id)
         if bank_id == 0:
-            continue  # not surveyed: the CAD geometry here, Geant4 puts it at the rear distance
+            continue  # the file has it at its carriage zero position, Geant4 at the rear distance
         ids, positions = banks[bank_id]
         index = pixel_id + 1 - ids[0]
         assert ids[index] == pixel_id + 1
@@ -532,8 +542,7 @@ def test_the_default_output_records_its_calibration(default_json):
     assert info["calibration"] == "2026-September-SAM-606"
     assert info["written_by"] == f"loki-geometry {__version__}"
     sources = info["bank_corner_sources"]
-    assert sources["0"].startswith("REFERENCE_BANKS_DATA")  # bank 0 was not surveyed
-    for bank_id in range(1, 9):
+    for bank_id in range(9):
         assert sources[str(bank_id)] == f"survey {SAM606.file_name} (sha256 {SAM606.checksum})"
 
 

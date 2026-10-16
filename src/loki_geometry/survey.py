@@ -39,7 +39,7 @@ A list of dictionaries in the same format as example_calibration_data:
   from -y to +y in vertical banks (NeXus coordinate system), so first_pixel_end
   is the +x end (horizontal banks) or the -y end (vertical banks).
 
-Only the banks in the label map are in the output (e.g. SAM-606 has no bank 0).
+Only the banks in the label map are in the output.
 """
 
 import argparse
@@ -400,6 +400,20 @@ def get_measured_calibration_data(filename=DEFAULT_SURVEY_FILE, verbose=True):
 
     # 4) group the end points into tubes, assign the A/B ends
     banks = group_points_into_tubes(points, survey_file.label_map, vertical_bank_ids, verbose)
+
+    #    the rear bank (0) moves with the detector carriage: back to the carriage zero position
+    carriage_shift = np.array([0.0, 0.0, survey_file.carriage_position])
+    if survey_file.carriage_position and 0 in banks:
+        if verbose:
+            print(
+                f"Bank 0: measured with the detector carriage at {survey_file.carriage_position} mm "
+                "from its zero position: its points are moved back along the beam by that much"
+            )
+        for tube in banks[0]:
+            tube["end_A"], tube["end_B"] = (
+                tube["end_A"] - carriage_shift,
+                tube["end_B"] - carriage_shift,
+            )
 
     #    the tubes must have a plausible length (at least half the straw length)
     for bank_id, tubes in sorted(banks.items()):

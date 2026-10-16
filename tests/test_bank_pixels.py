@@ -281,7 +281,7 @@ def test_pixel_offsets_cover_the_straw_exactly(pixel_reference, pixels_per_straw
 
 @pytest.fixture(scope="module")
 def measured_corners():
-    """Corners calibrated from the package survey (banks 1-8; bank 0 was not measured)."""
+    """Corners calibrated from the package survey (all 9 banks)."""
     with contextlib.redirect_stdout(io.StringIO()):
         data = survey.get_measured_calibration_data(SAM606.path, verbose=False)
         detectors = calibration.Detectors(data, True, run_checks=False)
@@ -296,7 +296,7 @@ def test_measured_corners_pass_the_pixel_model_checks(measured_corners):
     """The whole survey -> calibration -> pixel chain: the rounded (2 decimals)
     calibrated corners pass the corner-consistency and mirrored-bank checks, and
     give the nominal tube grid and straw lengths."""
-    assert sorted(measured_corners) == list(range(1, 9))
+    assert sorted(measured_corners) == list(range(9))
     pixels = lbp.compute_instrument_pixels(measured_corners, 2)
     for bank_id, bank in pixels.items():
         frame = bank.frame

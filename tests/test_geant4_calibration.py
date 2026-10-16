@@ -39,6 +39,13 @@ def measured():
 
 
 @pytest.fixture(scope="module")
+def measured_without_bank_0():
+    """A survey without bank 0 (SAM-606 with its bank 0 left out)."""
+    data = _quiet(get_measured_calibration_data, SAM606.path, verbose=False)
+    return _detectors([bank for bank in data if bank["bank_id"] != 0])
+
+
+@pytest.fixture(scope="module")
 def example():
     return _detectors(example_calibration_data)
 
@@ -90,7 +97,7 @@ def test_round_trip_is_exact(measured, tmp_path):
     path = gc.write_calibration_file(measured, tmp_path / "x.txt", "test", ["a comment", ""])
     name, banks = gc.read_calibration_file(path)
     assert name == "test"
-    assert sorted(banks) == list(range(1, 9))
+    assert sorted(banks) == list(range(9))
     for bank_id, values in banks.items():
         bank = measured.banks[bank_id]
         assert np.array_equal(values["F"], bank.front_face_centre)
@@ -113,7 +120,7 @@ def test_the_lines_of_the_file(measured):
     lines = gc.format_calibration(measured, "test").splitlines()
     data = [line for line in lines if not line.startswith("#")]
     assert data[:2] == ["loki_bank_calibration 1", "name test"]
-    assert [line.split()[:2] for line in data[2:]] == [["bank", str(b)] for b in range(1, 9)]
+    assert [line.split()[:2] for line in data[2:]] == [["bank", str(b)] for b in range(9)]
     assert all(len(line.split()) == 14 for line in data[2:])
     assert "#   bank_calibration=test" in lines
 
@@ -125,9 +132,10 @@ def test_all_9_banks_are_written():
     assert np.array_equal(banks[0]["F"], reference.banks[0].front_face_centre)
 
 
-def test_missing_banks_come_from_the_fallback_with_a_comment(measured):
-    """SAM-606 has no bank 0: without a fallback it is not written (Geant4 keeps its nominal
+def test_missing_banks_come_from_the_fallback_with_a_comment(measured_without_bank_0):
+    """A survey without bank 0: without a fallback it is not written (Geant4 keeps its nominal
     placement), with one it is written from the fallback, marked with a comment."""
+    measured = measured_without_bank_0
     reference = _detectors(convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA))
     assert 0 not in measured.banks
     _, banks = _parse(gc.format_calibration(measured, "x"))
@@ -260,7 +268,7 @@ def test_cli_writes_the_sam606_file_with_its_default_name(tmp_path, capsys, meas
     )
     text = path.read_text()
     assert sorted(gc.read_calibration_file(path)[1]) == list(range(9))
-    assert "# Bank 0 is not in the calibration input: written from REFERENCE_BANKS_DATA" in text
+    assert "is not in the calibration input" not in text  # SAM-606 has all 9 banks
     assert SAM606.file_name in text and SAM606.checksum in text
     assert "loki-calibrate --data measured" in text
     assert "Bank 5: tube UP9 constructed parallel to UP3 (bank 5 fix)." in text  # the survey note

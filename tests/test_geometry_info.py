@@ -198,23 +198,24 @@ def test_rear_detector_distance_moves_only_bank_0_along_z(calibration, distance)
 
 
 def test_sam606_agrees_with_the_geant4_geometry():
-    """The same pixel centres as Geant4 with the same calibration (all 9 banks; the rear bank
-    of both at 5 m). Banks 1-8 within 1e-6 mm. Bank 0 (not surveyed, from the CAD geometry):
-    within 0.002 mm, as its tube grid is built here from the REFERENCE_BANKS_DATA corners
-    (rounded to 0.01 mm), but in Geant4 from the exact tube pitches (the same at pixel 0, the
-    corner A[0])."""
+    """The same pixel centres as Geant4 with the same calibration (all 9 banks surveyed; the
+    rear bank of both at 5 m) within 1e-6 mm."""
     assert len(GEANT4_SAM606_PIXELS) == 27
     geometry = gi.LokiGeometry(SAM606, 256, rear_detector_distance=5000.0)
     for pixel, expected in GEANT4_SAM606_PIXELS.items():
-        tolerance = 0.002 if geometry.decode(pixel)[0] == 0 else 1e-6
-        assert np.abs(geometry.pixel_centre(pixel) - np.array(expected)).max() < tolerance, pixel
-    assert np.abs(geometry.pixel_centre(0) - np.array(GEANT4_SAM606_PIXELS[0])).max() < 1e-6
+        assert np.abs(geometry.pixel_centre(pixel) - np.array(expected)).max() < 1e-6, pixel
 
 
-def test_sam606_takes_bank_0_from_the_cad_geometry(cad):
+def test_sam606_bank_0_is_surveyed_at_the_carriage_zero_position(cad):
+    """Bank 0 of SAM-606 comes from the survey (measured with the detector carriage at
+    carriage_position, moved back to the carriage zero position): near the CAD position
+    (4999.8 mm), but not at it."""
     geometry = gi.LokiGeometry(SAM606)
-    assert np.array_equal(geometry.bank_pixel_centres(0), cad.bank_pixel_centres(0))
-    assert not np.array_equal(geometry.bank_pixel_centres(5), cad.bank_pixel_centres(5))
+    measured, intended = geometry.bank(0), cad.bank(0)
+    assert measured.distance == pytest.approx(4985.65, abs=0.01)
+    assert intended.distance == pytest.approx(4999.8, abs=1e-6)
+    shifts = np.linalg.norm(geometry.bank_pixel_centres(0) - cad.bank_pixel_centres(0), axis=1)
+    assert 10.0 < shifts.min() and shifts.max() < 20.0
 
 
 # --- ids -------------------------------------------------------------------------
@@ -369,6 +370,7 @@ def test_a_new_survey_calibration_is_available(monkeypatch, tmp_path):
         frame=sf.SAM606.frame,
         fixes=sf.SAM606.fixes,
         calibration_name="2027-January-test",
+        carriage_position=sf.SAM606.carriage_position,
     )
     monkeypatch.setitem(sf.SURVEY_FILES, entry.file_name, entry)
     assert "2027-January-test" in gi.available_calibrations()
@@ -383,7 +385,7 @@ def test_a_new_survey_calibration_is_available(monkeypatch, tmp_path):
 def test_cli_values(capsys):
     _, rear = run(["-b", "0", "-r", "10000"], capsys)
     assert "rear detector distance 10000.0 mm" in rear
-    assert "front face centre F [mm]: (0.000, 0.000, 10000.000)" in rear
+    assert "front face centre F [mm]: (-2.711, 0.540, 10000.000)" in rear  # surveyed x, y
     _, geant4 = run(["-c", "nominal-geant4-geometry"], capsys)
     assert "Calibration: nominal-geant4-geometry" in geant4
     assert "(100.000, 727.206, 1154.783)  1368.339" in geant4  # bank 5 in the Geant4 tables

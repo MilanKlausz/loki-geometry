@@ -48,9 +48,9 @@ def _nexus_points():
     return {k: sf.tank_window_frame(p) for k, p in _fixed_sam606_points().items()}
 
 
-def test_survey_file_covers_banks_1_to_8():
+def test_survey_file_covers_all_banks():
     data = survey.get_measured_calibration_data(SAM606.path, verbose=False)
-    assert [bank["bank_id"] for bank in data] == list(range(1, 9))
+    assert [bank["bank_id"] for bank in data] == list(range(9))
     for bank in data:
         for tube in bank["positions"]:
             assert tube["distance"] == pytest.approx(c.STRAW_LENGTHS[bank["bank_id"]])
@@ -121,7 +121,7 @@ def test_a_utf8_bom_is_ignored(register, tmp_path):
     _write(path, _nexus_points())
     path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
     register(sf.SurveyFile("bom.txt", sf.SAM606.label_map))
-    assert len(_quiet(survey.get_measured_calibration_data, str(path), verbose=False)) == 8
+    assert len(_quiet(survey.get_measured_calibration_data, str(path), verbose=False)) == 9
 
 
 def test_a_bank_needs_exactly_two_tubes():
@@ -180,7 +180,7 @@ def test_a_frame_may_return_a_list(register, tmp_path):
     path = _write(tmp_path / "listframe.txt", _nexus_points())
     register(sf.SurveyFile("listframe.txt", sf.SAM606.label_map, frame=lambda p: list(p)))
     data = _quiet(survey.get_measured_calibration_data, str(path), verbose=True)
-    assert len(data) == 8
+    assert len(data) == 9
 
 
 def test_repeated_calls_are_identical_and_leave_the_entry_untouched():
@@ -222,7 +222,8 @@ def test_fixes_run_in_order_in_the_file_frame_before_the_frame_conversion(regist
     assert np.allclose(seen[1][1], points["C2UP3I"] + [0, 0, 1])  # sees the first fix
     # survey Z -> NeXus y: tube C2UP3 (bank 1, tube 13) midpoint moved by 0.5 mm in y
     mid = lambda t: (np.array(t["first_pixel_end"]) + np.array(t["last_pixel_end"])) / 2  # noqa: E731
-    tube = lambda d: next(t for t in d[0]["positions"] if t["tube_id"] == 13)  # noqa: E731
+    bank_1 = lambda d: next(b for b in d if b["bank_id"] == 1)  # noqa: E731
+    tube = lambda d: next(t for t in bank_1(d)["positions"] if t["tube_id"] == 13)  # noqa: E731
     assert np.allclose(mid(tube(shifted)) - mid(tube(plain)), [0, 0.5, 0], atol=1e-9)
 
 
@@ -233,7 +234,7 @@ def test_without_frame_the_tube_midpoints_are_the_file_midpoints_exactly(registe
     path = _write(tmp_path / "asis.txt", points)
     register(sf.SurveyFile("asis.txt", sf.SAM606.label_map))
     data = _quiet(survey.get_measured_calibration_data, str(path), verbose=False)
-    assert [b["bank_id"] for b in data] == list(range(1, 9))
+    assert [b["bank_id"] for b in data] == list(range(9))
     by_id = {ids: label for label, ids in sf.SAM606.label_map.items()}
     for bank in data:
         for tube in bank["positions"]:
@@ -347,3 +348,21 @@ def test_a_tube_shorter_than_half_the_straw_length_is_rejected(register, tmp_pat
     _stretched_tube(points, "C2DP16", -150.0)
     with pytest.raises(ValueError, match="450.0 mm long"):
         _survey_output(register, tmp_path, points, "shorter.txt")
+
+
+def test_the_carriage_position_moves_only_bank_0_back_along_the_beam(register, tmp_path):
+    """carriage_position: the rear bank was measured with the detector carriage away from its
+    zero position; its points are moved back along z by that much, the other banks are not."""
+    path = _write(tmp_path / "carriage.txt", _nexus_points())
+    register(sf.SurveyFile("carriage.txt", sf.SAM606.label_map))
+    register(sf.SurveyFile("carriage2.txt", sf.SAM606.label_map, carriage_position=123.0))
+    (tmp_path / "carriage2.txt").write_bytes(path.read_bytes())
+    plain = _quiet(survey.get_measured_calibration_data, str(path), verbose=False)
+    moved = _quiet(
+        survey.get_measured_calibration_data, str(tmp_path / "carriage2.txt"), verbose=False
+    )
+    for bank_plain, bank_moved in zip(plain, moved):
+        shift = [0.0, 0.0, -123.0] if bank_plain["bank_id"] == 0 else [0.0, 0.0, 0.0]
+        for t_plain, t_moved in zip(bank_plain["positions"], bank_moved["positions"]):
+            for end in ("first_pixel_end", "last_pixel_end"):
+                assert np.allclose(np.subtract(t_moved[end], t_plain[end]), shift, atol=1e-9)

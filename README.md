@@ -45,14 +45,15 @@ repository root; no installation is needed for that.
 3. **Write the pixel geometry**, with the pixel number of the instrument file (`loki.json`: 512 per straw):
    `loki-pixel-json -o loki_detector_pixels.json --pixels-per-straw 512` (the default calibration, i.e. the measured
    geometry; another one with `-c NAME`). The `info` of the output records the calibration and, per bank, the source of
-   its corners (SAM-606 has no bank 0: it keeps the intended CAD geometry) and the package version.
+   its corners (the survey, or `REFERENCE_BANKS_DATA` for a bank that is not in it) and the package version.
 4. **Check it.** `loki-verify-json loki_detector_pixels.json` compares it with the pixel positions of its calibration;
    `loki-verify-json loki_detector_pixels.json -c nominal-geant4-geometry` shows how far the measured geometry is from
    the nominal one (tens of mm for some banks).
    With the Geant4 geometry (in a dgcode_projects environment, the file is read like the instrument file):
-   `sb_g4geoloki_verifyjson --json loki_detector_pixels.json -rear 4.9998` compares it with the Geant4 pixel centres of
-   the calibration recorded in the file (`-rear 4.9998`: the rear bank of the CAD geometry, used for the banks that were
-   not surveyed, has its front face at 4.9998 m; Geant4 places it at the rear detector distance).
+   `sb_g4geoloki_verifyjson --json loki_detector_pixels.json -rear 4.98565` compares it with the Geant4 pixel centres
+   of the calibration recorded in the file (`-rear`: the distance of the rear bank front face of the file, at its
+   carriage zero position, `loki-info -b 0`: 4.98565 m for SAM-606, 4.9998 m for the CAD geometry; Geant4 places the
+   rear bank at the rear detector distance).
 5. **Copy it into the template** (in the repository of the instrument's JSON file). The output has the tree of the
    instrument file, with only these nodes in `/entry/instrument`: in each `loki_detector_<id>` group,
    replace the geometry children (`detector_number`, `pixel_shape`, `x/y/z_pixel_offset`, `transformations`,
@@ -62,7 +63,7 @@ repository root; no installation is needed for that.
    `loki.json` (see [Pixel geometry for the instrument JSON file](#pixel-geometry-for-the-instrument-json-file)).
 6. **Check the updated template.** It has no `info` (no recorded calibration), so give the calibration:
    `loki-verify-json path/to/loki.json -c 2026-September-SAM-606` and, with the Geant4 geometry,
-   `sb_g4geoloki_verifyjson --json path/to/loki.json --bankCalibration 2026-September-SAM-606 -rear 4.9998`. Both read
+   `sb_g4geoloki_verifyjson --json path/to/loki.json --bankCalibration 2026-September-SAM-606 -rear 4.98565`. Both read
    the banks by name and follow their `depends_on` chains (bank 0 through the detector carriage), so a broken chain, a
    transformation that is not a translation or a wrong unit is an error or shows as a deviation.
 
@@ -97,7 +98,7 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 
 | Module | What it is |
 | --- | --- |
-| `data/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt` (package data) | SAM-606 survey of the tube ends (the default survey): 32 points (2 tubes × 2 ends for banks 1–8) as `label, X, Y, Z` [mm] in the TANK WINDOW coordinate system (X along the beam, Y left, Z up). The points are on the tube axis at the physical tube ends, including the end electronics (the measured tubes are about 30 mm longer than the effective straw length). Bank 0 was not surveyed. |
+| `data/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt` (package data) | SAM-606 survey of the tube ends (the default survey): 36 points (2 tubes × 2 ends for each of the 9 banks; bank 0 measured later, SAM-606 Rev2, with the detector carriage at 10 m) as `label, X, Y, Z` [mm] in the TANK WINDOW coordinate system (X along the beam, Y left, Z up). The points are on the tube axis at the physical tube ends, including the end electronics (the measured tubes are about 30 mm longer than the effective straw length). |
 | `survey_files` | What is specific to each known survey file, one `SurveyFile` entry per file: its tube label map (label → bank, tube id), and optionally its coordinate frame, a checksum of its content, fixes (e.g. the SAM-606 bank 5 fix) and notes. Unknown files, and files that do not match their checksum, are rejected. See [A new survey](#a-new-survey). |
 | `survey` (`loki-survey`) | Converts a survey file into calibration data, using the file's `survey_files` entry: fixes, frame conversion, grouping into tubes, sanity checks, trimming of the end electronics. |
 | `calibration` (`loki-calibrate`) | The calibration: calibration data → 8 corner positions per bank, quality report, comparison with the intended geometry, output in the `REFERENCE_BANKS_DATA` format. |
@@ -194,7 +195,7 @@ loki-verify-json path/to/loki.json --ignore-pixel-shape            # offsets onl
 - Checks (all in `tests/`):
   - With the default calibration (the SAM-606 survey), the pixel positions read back from the file equal the pixel
     centres of the Geant4 geometry with the same calibration (hard-coded G4GeoLoki values) within 1e-4 mm (banks 1–8;
-    bank 0 was not surveyed).
+    bank 0, which the file has at its carriage zero position, agrees within 1e-6 mm at the same rear distance).
   - With corners taken from the Geant4 geometry, all 1,605,632 pixels agree with the Geant4 port within 1e-6 mm.
   - With `REFERENCE_BANKS_DATA` they agree within 1 mm, which is the rounding of the CAD values in Geant4.
   - With 512 pixels per straw, the current `loki.json` offsets are reproduced within 0.011 mm, which is its 5-decimal rounding
@@ -262,7 +263,7 @@ Steps 1–4 use the file's entry in `survey_files` (here `SAM606`):
    - tilt angle, front face distance and front face centre shift vs the intended geometry
    - the placement in the drawing's terms (section distance, position angle, offset along the tubes)
 9. **Output** (`--print`, `Detectors.formatted_data`): the corners as straw ends in the `REFERENCE_BANKS_DATA` format,
-   the input of `bank_pixels`. Only the banks in the survey are in the output (e.g. SAM-606 has no bank 0).
+   the input of `bank_pixels`. Only the banks in the survey are in the output.
 10. **Pixel geometry**: `loki-pixel-json` and `loki-info` use these corners when the calibration is selected by its
     name (the `calibration_name` of the survey entry; the default survey's calibration is their default); banks that
     are not in the survey are taken from `REFERENCE_BANKS_DATA`. See
@@ -320,6 +321,9 @@ The new file and entry are part of the package, so the installed package must in
      `fix(points, verbose)` with `{label: np.array([X, Y, Z])}` in the file's frame, returning the corrected points; it
      should check its assumption and print a `WARNING` if it fails. See `sam606_fix_bank5_mislabelled_tube`.
    - `bank_notes`: notes printed with the checks of a bank (e.g. a tube made parallel by a fix).
+   - `carriage_position`: the position of the detector carriage during the survey of the rear bank (0), in mm from
+     its zero position (the position of `detector_carriage_zero`, the 5 m position of the CAD geometry). The bank 0
+     points are moved back along the beam by it. SAM-606: 5000 mm (the rear bank at 10 m). Default 0.
    - `calibration_name`: the name of the calibration made from this file. It is needed to use the survey in
      `loki-pixel-json` and `loki-info` (`-c NAME`), and it is the default name of the Geant4 calibration file. A name
      that says when and where the survey was made helps, like `2026-September-SAM-606`.
@@ -439,7 +443,7 @@ last to the first pixel end), w (across the tubes in the tube plane, towards tub
 away from the sample), in the NeXus frame in mm, with full double precision: the `front_face_centre`,
 `vector_along_tubes`, `vector_perpendicular_tubes` and `vector_perpendicular_layers` of `calibration.Bank`. These fix
 the full rigid placement of each bank (3 rotations and 3 shifts); the tube grid inside the bank stays the one of
-Geant4. All 9 banks are written; a bank that is not in the survey (e.g. bank 0 of SAM-606) is written from
+Geant4. All 9 banks are written; a bank that is not in the survey is written from
 `REFERENCE_BANKS_DATA` (the intended geometry), marked with a comment in the file. The rear bank (0) moves along the
 beam: Geant4 uses its axes and the x and y of its front face centre, while the z is set by the rear detector distance of
 the simulation. Banks that are not in the file keep their nominal Geant4 placement.

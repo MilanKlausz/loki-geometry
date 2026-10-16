@@ -4,8 +4,8 @@ into the instrument's JSON file (the file-writer configuration, e.g. loki.json):
 the main output of the package. The pixel positions are those of a bank
 calibration (--calibration, see geometry_info.py): by default the calibration of
 the default survey (the ACTUAL, surveyed geometry, e.g. 2026-September-SAM-606;
-banks that were not surveyed, like the rear bank of SAM-606, keep the intended
-CAD geometry), or nominal-cad-geometry / nominal-geant4-geometry.
+banks that are not in a survey keep the intended CAD geometry), or
+nominal-cad-geometry / nominal-geant4-geometry.
 
 For each bank ("loki_detector_<id>") the output contains the geometry parts of
 its NXdetector group, in the same structure as in loki.json:

@@ -21,8 +21,8 @@ Usage
                     geometry (see geant4_calibration.py) to PATH; if PATH is a
                     directory (e.g. G4GeoLoki/data of dgcode_projects), the
                     file bank_calibration_<NAME>.txt is written in it; all 9
-                    banks, those missing from the input (e.g. bank 0 of
-                    SAM-606) from REFERENCE_BANKS_DATA
+                    banks, those missing from the input from
+                    REFERENCE_BANKS_DATA
   --geant4-calibration-name NAME  the calibration name (the bank_calibration
                     value of the Geant4 geometry); default: the calibration_name
                     of the survey file entry (survey_files.py), required for
@@ -901,7 +901,7 @@ def main(argv=None):
         comments = [f"Written by loki-geometry {__version__} (loki-calibrate --data {args.data})."]
         comments += provenance
         try:
-            # banks missing from the input (e.g. bank 0 of SAM-606): the intended geometry
+            # banks missing from the input: the intended geometry
             path = geant4_calibration.write_calibration_file(
                 detectors,
                 args.geant4_calibration_file,

@@ -242,8 +242,18 @@ def test_formatted_data_straw_ends_are_one_straw_length_apart():
 
 
 # SAM-606: the largest distance of the model tubes from the input tubes [mm] (calibrate
-# --verbose: 0.08, 0.12, 0.25, 0.71, 0.45, 0.37, 1.44, 0.15 for banks 1-8), with a 0.1 mm margin
-SAM606_RESIDUAL_LIMITS = {1: 0.2, 2: 0.25, 3: 0.35, 4: 0.85, 5: 0.55, 6: 0.5, 7: 1.55, 8: 0.25}
+# --verbose: 0.75, 0.08, 0.12, 0.25, 0.71, 0.45, 0.37, 1.44, 0.15 for banks 0-8), with a 0.1 mm margin
+SAM606_RESIDUAL_LIMITS = {
+    0: 0.85,
+    1: 0.2,
+    2: 0.25,
+    3: 0.35,
+    4: 0.85,
+    5: 0.55,
+    6: 0.5,
+    7: 1.55,
+    8: 0.25,
+}
 
 
 def test_measured_banks_reproduce_their_input_tubes(measured_detectors):
@@ -310,7 +320,8 @@ def test_sample_to_window_distance_changes_only_the_distance_numbers(monkeypatch
         d0, a0, _ = before.section_parameters(bank_id)
         d1, a1, _ = after.section_parameters(bank_id)
         assert d1 - d0 > 40.0
-        assert abs(a1 - a0) > 1e-3
+        if bank_id != 0:  # (the rear bank is on the beam axis: its position angle stays ~0)
+            assert abs(a1 - a0) > 1e-3
 
 
 def test_calibration_checks_pass_for_the_reference_data(capsys):

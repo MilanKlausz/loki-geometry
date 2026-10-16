@@ -25,7 +25,8 @@ path are errors. --ignore-pixel-shape uses bank position + pixel offset only.
 
 Assumptions:
   - bank 0 (rear bank) is compared with its position in the calibration
-    (nominal Geant4: front face at 5 m; CAD and the SAM-606 survey: 4999.8 mm),
+    (its front face at carriage zero: nominal Geant4 5 m, CAD 4999.8 mm, a survey
+    calibration its surveyed position, e.g. 4985.65 mm for SAM-606),
     i.e. detector_carriage_zero must correspond to that (as in loki.json);
   - vertices 0 and 2 of the pixel shape are the centres of the two cylinder
     faces, in the units of the pixel offsets (m).

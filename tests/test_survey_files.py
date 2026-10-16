@@ -129,12 +129,12 @@ def test_tank_window_frame_is_a_proper_rotation_plus_shift():
     assert np.linalg.det(matrix) == pytest.approx(1.0)  # handedness preserved
 
 
-def test_sam606_label_map_covers_two_front_tubes_of_banks_1_to_8():
+def test_sam606_label_map_covers_two_front_tubes_of_every_bank():
     by_bank = {}
     for bank_id, tube_id in sf.SAM606.label_map.values():
         assert 0 <= tube_id < c.TUBES_PER_LAYER[bank_id]  # front layer
         by_bank.setdefault(bank_id, []).append(tube_id)
-    assert sorted(by_bank) == list(range(1, 9))
+    assert sorted(by_bank) == list(range(9))
     assert all(len(set(tubes)) == 2 for tubes in by_bank.values())
 
 
@@ -156,7 +156,7 @@ def test_sam606_label_map_matches_the_nominal_tube_positions():
     """Absolute tube identification: the transverse position of each measured
     tube, in pitches from tube 0 of REFERENCE_BANKS_DATA, is its assigned id."""
     banks = _sam606_banks()
-    assert sorted(banks) == list(range(1, 9))
+    assert sorted(banks) == list(range(9))
     for bank_id, tubes in banks.items():
         ref = REFERENCE_BANKS_DATA[bank_id]
         top, bottom = np.array(ref["A"][0], float), np.array(ref["A"][2], float)
@@ -281,6 +281,7 @@ def test_a_new_survey_file_with_its_own_entry(register, tmp_path):
             description="synthetic test survey",
             frame=metre_frame,
             label_map={new_labels[old]: ids for old, ids in sf.SAM606.label_map.items()},
+            carriage_position=sf.SAM606.carriage_position,
         )
     )
     new = _quiet(survey.get_measured_calibration_data, str(path), verbose=False)
@@ -296,11 +297,14 @@ def test_a_new_survey_file_with_its_own_entry(register, tmp_path):
 
 def _write_sam606_in_nexus_frame(path):
     """The SAM-606 points (bank 5 already fixed), converted to NeXus coordinates
-    relative to the sample, with the SAM-606 labels."""
+    relative to the sample (bank 0 at the carriage zero position), with the SAM-606 labels."""
     raw = _quiet(sf.sam606_fix_bank5_mislabelled_tube, survey.read_measured_points(SAM606.path))
+    rear = {label for label, (bank_id, _) in sf.SAM606.label_map.items() if bank_id == 0}
     lines = []
     for label, point in raw.items():
         x, y, z = sf.tank_window_frame(point)
+        if label.rstrip("I") in rear:
+            z -= sf.SAM606.carriage_position
         lines.append(f"{label}, {x:.3f}, {y:.3f}, {z:.3f}")
     path.write_text("\n".join(lines) + "\n")
 

@@ -65,6 +65,10 @@ class SurveyFile:
     calibration_name: Optional[str] = (
         None  # the name of its calibration (loki-pixel-json, loki-info)
     )
+    # [mm] the position of the detector carriage (the rear bank, 0) during the survey, from its zero
+    # position (the 5 m position, where the bank is placed by the calibration and as
+    # detector_carriage_zero): the points of bank 0 are moved back by it along the beam (z)
+    carriage_position: float = 0.0
 
     @property
     def path(self):
@@ -115,14 +119,17 @@ def tank_window_frame(point):
 
 
 # ---------------------------------------------------------------------------
-# SAM-606 (2026): tube ends of banks 1-8 in the TANK WINDOW coordinate system
+# SAM-606 (2026): tube ends of all 9 banks in the TANK WINDOW coordinate system
 # ---------------------------------------------------------------------------
 
 SAM606_FILE_NAME = "ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt"
 
 # Labels like "C2RP16": C1 / C2 = front / middle carriage, U/D/L/R = up / down /
 # left / right bank of the carriage, P<n> = the surveyors' "pipe" number, which
-# does NOT follow our tube numbering. The tubes were identified by comparing the
+# does NOT follow our tube numbering. C3 = the rear carriage (bank 0), measured later
+# (SAM-606 Rev2, "C3LP1" / "C3RP1" = the left / right end of pipe 1): its points are
+# in the file as "C3P1I" / "C3P1II" (I = left = the first pixel end), only the two
+# outermost tubes (P1, P56; the file Rev2 also has P28, consistent with them). The tubes were identified by comparing the
 # measured positions with the nominal tube positions (survey.py re-checks this
 # every time it runs, see check_tube_ids_against_nominal).
 SAM606_LABEL_MAP = {
@@ -148,6 +155,9 @@ SAM606_LABEL_MAP = {
     "C1DP31": (7, 18),  # front bottom, 19th tube of 20 (label "31" is misleading)
     "C1RP1": (8, 0),  # front right, leftmost (innermost) tube
     "C1RP11": (8, 10),  # front right, 11th tube from the left (of 32)
+    # --- rear carriage (C3), SAM-606 Rev2; here the P numbers are the rows + 1 ---
+    "C3P1": (0, 0),  # rear, topmost tube (1st of 56 rows)
+    "C3P56": (0, 55),  # rear, bottom tube (56th of 56 rows)
 }
 
 BANK5_FIX_TOLERANCE = 0.25  # [tube pitch] accepted deviation of the discarded point
@@ -186,16 +196,18 @@ def sam606_fix_bank5_mislabelled_tube(points, verbose=True):
 
 SAM606 = SurveyFile(
     file_name=SAM606_FILE_NAME,
-    checksum="7195877da8cbc18f846a9ef1b381696b7c51bc6f2a334c75ef203f1d051c2202",
-    description="SAM-606 survey (2026): both ends of 2 front layer tubes of banks 1-8 "
-    "(32 points), on the tube axis at the physical tube ends (including the end electronics), "
-    "in the TANK WINDOW coordinate system (sample to window distance "
-    f"{SAMPLE_TO_TANK_WINDOW_DISTANCE} mm). Bank 0 was not surveyed.",
+    checksum="cbdc6a9693206af3198f54d0230450c065d3e5df138e71c0ea0e6c46cfaab7d1",
+    description="SAM-606 survey (2026): both ends of 2 front layer tubes of each of the 9 banks "
+    "(36 points; the bank 0 points from the revision SAM-606 Rev2), on the tube axis at the physical "
+    "tube ends (including the end electronics), in the TANK WINDOW coordinate system (sample to window "
+    f"distance {SAMPLE_TO_TANK_WINDOW_DISTANCE} mm), with the detector carriage at 5.0 m along z "
+    "(carriage_position 5000 mm).",
     frame=tank_window_frame,
     label_map=SAM606_LABEL_MAP,
     fixes=(sam606_fix_bank5_mislabelled_tube,),
     bank_notes={5: "tube UP9 constructed parallel to UP3 (bank 5 fix)"},
     calibration_name="2026-September-SAM-606",
+    carriage_position=5000.0,  # the carriage at 5.0 m (the rear bank at 10 m) during the bank 0 measurement
 )
 
 # ---------------------------------------------------------------------------

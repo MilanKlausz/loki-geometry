@@ -19,7 +19,7 @@ y up, z along the beam, origin at the sample), [mm]:
   w  vector_perpendicular_tubes: in the tube plane, towards tube 0
   n  vector_perpendicular_layers: u x w, pointing away from the sample
 (the attributes of calibration.Bank). All 9 banks are written; a bank that is
-not in the calibration input (e.g. bank 0 of SAM-606) can be taken from another
+not in the calibration input can be taken from another
 geometry (loki-calibrate: REFERENCE_BANKS_DATA), marked with a comment. The rear
 bank (0) moves along the beam: Geant4 uses its axes and the x and y of its F,
 while the z of F is given by the rear detector distance of the simulation.
