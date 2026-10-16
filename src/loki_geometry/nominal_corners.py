@@ -211,7 +211,6 @@ def main(bankIds_to_process):
     detectors = Detectors()
     all_match = True
 
-    # TODO this comparison could be part of the Detector class
     for bankId in bankIds_to_process:
         positionA = detectors.banks[bankId].positionA
         positionB = detectors.banks[bankId].positionB

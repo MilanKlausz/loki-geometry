@@ -117,6 +117,45 @@ def test_geant4_example_data_reproduces_the_nominal_placement():
         assert (distance, angle, offset) == pytest.approx(nominal, abs=1e-5)  # data has 6 decimals
 
 
+def _rotated(data, bank_id, axis, angle_deg, centre):
+    """Calibration data with the tubes of a bank rotated about axis (through centre)."""
+    k = np.asarray(axis, dtype=float) / np.linalg.norm(axis)
+    a = np.radians(angle_deg)
+    matrix = (
+        np.cos(a) * np.eye(3)
+        + np.sin(a) * np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+        + (1 - np.cos(a)) * np.outer(k, k)
+    )
+    data = copy.deepcopy(data)
+    for bank in data:
+        if bank["bank_id"] == bank_id:
+            for tube in bank["positions"]:
+                for end in ("first_pixel_end", "last_pixel_end"):
+                    tube[end] = list(
+                        matrix @ (np.asarray(tube[end], dtype=float) - centre) + centre
+                    )
+    return data
+
+
+@pytest.mark.parametrize("bank_id", c.BANK_IDS)
+def test_tilt_and_roll_angles_are_separated(bank_id):
+    """A rotation of the tubes in the bank plane (about the normal) is the roll angle and does
+    not change the tilt angle; a rotation about the tubes changes only the tilt angle."""
+    data = convert_reference_data_to_calibration_data(REFERENCE_BANKS_DATA)
+    reference = _detectors(data)
+    bank = reference.banks[bank_id]
+    centre = bank.front_face_centre
+    assert reference.roll_angle(bank_id) == pytest.approx(0.0, abs=1e-3)  # CAD rounding
+    rolled = _detectors(_rotated(data, bank_id, bank.vector_perpendicular_layers, 0.3, centre))
+    assert rolled.roll_angle(bank_id) == pytest.approx(0.3, abs=2e-3)
+    assert rolled.tilt_angle(bank_id) == pytest.approx(reference.tilt_angle(bank_id), abs=1e-3)
+    tilted = _detectors(_rotated(data, bank_id, bank.vector_along_tubes, 0.3, centre))
+    assert abs(tilted.tilt_angle(bank_id) - reference.tilt_angle(bank_id)) == pytest.approx(
+        0.3, abs=1e-3
+    )
+    assert tilted.roll_angle(bank_id) == pytest.approx(0.0, abs=1e-3)
+
+
 @pytest.mark.parametrize("bank_id", c.BANK_IDS)
 def test_any_pair_of_front_tubes_recovers_the_geant4_corners(bank_id):
     """Two arbitrary front layer tubes (not only 0 and N-1, in any order, also

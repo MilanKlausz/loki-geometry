@@ -36,6 +36,13 @@ An entry (SurveyFile), only file_name and label_map are required:
                 survey is their default): the name of the bank calibration made
                 from this file; also the default name of the Geant4 calibration
                 file (loki-calibrate --geant4-calibration-file)
+  carriage_position  optional [mm]: the position of the detector carriage during the
+                survey of the rear bank (0), from its zero position; the bank 0 points
+                are moved back along z by it (default 0; an error if bank 0 is not in
+                the label map)
+  excess_length_range  optional [mm]: (min, max) of the expected measured - effective
+                tube length, checked for every tube (default DEFAULT_EXCESS_LENGTH_RANGE,
+                20-40 mm, for points at the physical tube ends)
 """
 
 import hashlib
@@ -49,6 +56,9 @@ import numpy as np
 from . import constants as c
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+# [mm] expected measured - effective tube length for points at the physical tube ends (the end
+# electronics, ~15 mm at each end)
+DEFAULT_EXCESS_LENGTH_RANGE = (20.0, 40.0)
 
 
 @dataclass(frozen=True)
@@ -69,6 +79,8 @@ class SurveyFile:
     # position (the 5 m position, where the bank is placed by the calibration and as
     # detector_carriage_zero): the points of bank 0 are moved back by it along the beam (z)
     carriage_position: float = 0.0
+    # [mm] the expected measured - effective tube length (the length removed by the trimming)
+    excess_length_range: tuple[float, float] = DEFAULT_EXCESS_LENGTH_RANGE
 
     @property
     def path(self):
@@ -129,9 +141,10 @@ SAM606_FILE_NAME = "ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt
 # does NOT follow our tube numbering. C3 = the rear carriage (bank 0), measured later
 # (SAM-606 Rev2, "C3LP1" / "C3RP1" = the left / right end of pipe 1): its points are
 # in the file as "C3P1I" / "C3P1II" (I = left = the first pixel end), only the two
-# outermost tubes (P1, P56; the file Rev2 also has P28, consistent with them). The tubes were identified by comparing the
-# measured positions with the nominal tube positions (survey.py re-checks this
-# every time it runs, see check_tube_ids_against_nominal).
+# outermost tubes (P1, P56; the file Rev2 also has P28, consistent with them).
+# The tubes were identified by comparing the measured positions with the nominal
+# tube positions (survey.py re-checks this every time it runs, see
+# check_tube_ids_against_nominal).
 SAM606_LABEL_MAP = {
     # --- middle carriage (C2) ---
     "C2UP16": (1, 0),  # mid top, topmost tube (1st of 16 rows)

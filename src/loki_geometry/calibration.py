@@ -124,7 +124,7 @@ class Detectors:
     intended_bank_tilt_angles = np.array(c.BANK_TILT_ANGLES)  # [deg]
     intended_bank_distances = np.array(
         c.BANK_DISTANCES
-    )  # [mm] #TODO the rear bank distance should be an input value
+    )  # [mm] (bank 0: at the carriage zero position)
     intended_bank_position_angles = np.array(
         c.BANK_POSITION_ANGLES
     )  # [deg], + is up (horizontal) / left (vertical)
@@ -311,6 +311,9 @@ class Detectors:
                 f"  tilt angle: {tilt:.3f} deg, intended {intended_tilt:.3f} deg ({self.intended_label}; Geant4 nominal "
                 f"{self.intended_bank_tilt_angles[bank_id]:.3f}), difference {tilt - intended_tilt:+.3f} deg"
             )
+            print(
+                f"  roll angle (rotation of the tubes in the bank plane): {self.roll_angle(bank_id):.3f} deg"
+            )
             intended_centre = self.intended_centre(bank_id)
             intended_distance = np.linalg.norm(intended_centre)
             shift = bank.front_face_centre - intended_centre
@@ -470,18 +473,28 @@ class Detectors:
             direction = np.array([0.0, np.sin(angle), np.cos(angle)])
         return distance * direction + self.intended_bank_offsets[bank_id]
 
+    def _section_axes(self, bank_id):
+        """(the axis along the tubes, the axis across the tubes) of the section plane: (x, y)
+        for horizontal banks, (y, x) for vertical banks, as coordinate indices."""
+        return (1, 0) if bank_id in self.vertical_bank_ids else (0, 1)
+
     def tilt_angle(self, bank_id):
         """Tilt angle of a bank [degrees]: the angle between the in-plane vector
-        perpendicular to the tubes and the y axis (horizontal banks) or the
-        x axis (vertical banks). Only the magnitude is returned."""
-        bank = self.banks[bank_id]
-        axis = (
-            np.array([1.0, 0.0, 0.0])
-            if bank_id in self.vertical_bank_ids
-            else np.array([0.0, 1.0, 0.0])
-        )
-        dot_product = np.dot(bank.vector_perpendicular_tubes, axis)
-        return np.degrees(np.arccos(np.clip(abs(dot_product), -1.0, 1.0)))
+        perpendicular to the tubes (w), projected into the section plane (y-z for
+        horizontal banks, x-z for vertical banks), and the y axis (horizontal banks)
+        or the x axis (vertical banks). Only the magnitude is returned. A rotation
+        of the tubes within the bank plane does not change it (see roll_angle)."""
+        _, across = self._section_axes(bank_id)
+        w = self.banks[bank_id].vector_perpendicular_tubes
+        return np.degrees(np.arctan2(abs(w[2]), abs(w[across])))
+
+    def roll_angle(self, bank_id):
+        """Roll angle of a bank [degrees]: the rotation of the tubes within the bank
+        plane, i.e. the angle between w and the section plane (0 in the intended
+        geometry). Only the magnitude is returned."""
+        along, _ = self._section_axes(bank_id)
+        w = self.banks[bank_id].vector_perpendicular_tubes
+        return np.degrees(np.arcsin(np.clip(abs(w[along]), 0.0, 1.0)))
 
     def _verify_bank_tilt_angle(self):
         angle_tolerance = 0.1
@@ -686,11 +699,12 @@ class Bank:
         top_to_bottom_vector = (
             -self.vector_perpendicular_tubes * (self.tubes_per_layer - 1) * self.tube_tube_distance
         )
-        front_to_back_vector = self.vector_perpendicular_layers * self.front_to_back_in_distance + (
-            self.vector_perpendicular_tubes * self.front_to_back_up_distance
-            if not self.is_upside_down_bank
-            else -self.vector_perpendicular_tubes * self.front_to_back_up_distance
-        )  # TODO clean this!
+        # the back layer is shifted towards tube 0 (+w), or away from it for upside down packs
+        in_plane_sign = -1.0 if self.is_upside_down_bank else 1.0
+        front_to_back_vector = (
+            self.vector_perpendicular_layers * self.front_to_back_in_distance
+            + in_plane_sign * self.vector_perpendicular_tubes * self.front_to_back_up_distance
+        )
 
         back_top_tube_end = front_top_tube_end + front_to_back_vector
         front_bottom_tube_end = front_top_tube_end + top_to_bottom_vector

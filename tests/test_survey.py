@@ -366,3 +366,29 @@ def test_the_carriage_position_moves_only_bank_0_back_along_the_beam(register, t
         for t_plain, t_moved in zip(bank_plain["positions"], bank_moved["positions"]):
             for end in ("first_pixel_end", "last_pixel_end"):
                 assert np.allclose(np.subtract(t_moved[end], t_plain[end]), shift, atol=1e-9)
+
+
+def test_a_carriage_position_needs_bank_0(register, tmp_path):
+    """carriage_position without bank 0 in the label map is an error (a wrong entry)."""
+    points = {k: p for k, p in _nexus_points().items() if not k.startswith("C3")}
+    label_map = {k: v for k, v in sf.SAM606.label_map.items() if v[0] != 0}
+    path = _write(tmp_path / "no_rear.txt", points)
+    register(sf.SurveyFile("no_rear.txt", label_map, carriage_position=5000.0))
+    with pytest.raises(ValueError, match="carriage_position"):
+        _quiet(survey.get_measured_calibration_data, str(path), verbose=False)
+    register(sf.SurveyFile("no_rear.txt", label_map))  # without it: fine
+    data = _quiet(survey.get_measured_calibration_data, str(path), verbose=False)
+    assert [bank["bank_id"] for bank in data] == list(range(1, 9))
+
+
+@pytest.mark.parametrize("excess_range, warned", [((20.0, 40.0), False), ((-1.0, 1.0), True)])
+def test_the_extra_length_range_is_set_by_the_entry(register, tmp_path, excess_range, warned):
+    """excess_length_range of the entry: the SAM-606 tubes (~30 mm longer than the straws) are
+    fine with the default, all reported with a range for points at the straw ends."""
+    assert sf.SurveyFile("x.txt", {}).excess_length_range == sf.DEFAULT_EXCESS_LENGTH_RANGE
+    assert survey.EXCESS_LENGTH_RANGE == sf.DEFAULT_EXCESS_LENGTH_RANGE == (20.0, 40.0)
+    path = _write(tmp_path / "range.txt", _nexus_points())
+    register(sf.SurveyFile("range.txt", sf.SAM606.label_map, excess_length_range=excess_range))
+    with contextlib.redirect_stdout(io.StringIO()) as output:
+        survey.get_measured_calibration_data(str(path), verbose=False)
+    assert output.getvalue().count("WARNING: unexpected extra length!") == (18 if warned else 0)

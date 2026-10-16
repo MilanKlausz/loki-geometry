@@ -98,7 +98,7 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 
 | Module | What it is |
 | --- | --- |
-| `data/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt` (package data) | SAM-606 survey of the tube ends (the default survey): 36 points (2 tubes × 2 ends for each of the 9 banks; bank 0 measured later, SAM-606 Rev2, with the detector carriage at 10 m) as `label, X, Y, Z` [mm] in the TANK WINDOW coordinate system (X along the beam, Y left, Z up). The points are on the tube axis at the physical tube ends, including the end electronics (the measured tubes are about 30 mm longer than the effective straw length). |
+| `data/ESS.NSS.D03.LOKI.OB.DETECTOR_PIPE_CENTRES.TANK_WINDOW_CS.txt` (package data) | SAM-606 survey of the tube ends (the default survey): 36 points (2 tubes × 2 ends for each of the 9 banks; bank 0 measured later, SAM-606 Rev2, with the detector carriage at 5.0 m, i.e. the rear bank at 10 m) as `label, X, Y, Z` [mm] in the TANK WINDOW coordinate system (X along the beam, Y left, Z up). The points are on the tube axis at the physical tube ends, including the end electronics (the measured tubes are about 30 mm longer than the effective straw length). |
 | `survey_files` | What is specific to each known survey file, one `SurveyFile` entry per file: its tube label map (label → bank, tube id), and optionally its coordinate frame, a checksum of its content, fixes (e.g. the SAM-606 bank 5 fix) and notes. Unknown files, and files that do not match their checksum, are rejected. See [A new survey](#a-new-survey). |
 | `survey` (`loki-survey`) | Converts a survey file into calibration data, using the file's `survey_files` entry: fixes, frame conversion, grouping into tubes, sanity checks, trimming of the end electronics. |
 | `calibration` (`loki-calibrate`) | The calibration: calibration data → 8 corner positions per bank, quality report, comparison with the intended geometry, output in the `REFERENCE_BANKS_DATA` format. |
@@ -215,7 +215,7 @@ Steps 1–4 use the file's entry in `survey_files` (here `SAM606`):
 1. **Read the survey** (`survey.read_measured_points`) and look up its entry (`survey_files.survey_file_info`: by file
    name, and, if the entry has a checksum, the content must match it). `label, X, Y, Z` lines.
    SAM-606 labels: `C1`/`C2` = front/middle carriage, `U/D/L/R` = up/down/left/right bank, `P<n>` = the surveyors' pipe
-   number, `I`/`II` = the two ends of the tube.
+   number, `I`/`II` = the two ends of the tube; `C3P<n>` = the rear bank (bank 0), `P<n>` = row n − 1.
 2. **Apply the fixes of the file**. SAM-606 has one, `sam606_fix_bank5_mislabelled_tube`: `C1UP8I` and `C1UP8II` are on two
    different tubes (UP9 and UP8). Assuming parallel tubes, the missing end of tube UP9 is rebuilt as
    `C1UP8I + (C1UP3II − C1UP3I)`, and `C1UP8II` is dropped. A check confirms that the dropped point is one tube pitch
@@ -234,7 +234,8 @@ Steps 1–4 use the file's entry in `survey_files` (here `SAM606`):
 5. **Sanity checks** (always run; all results are printed by `loki-survey` and `loki-calibrate --verbose`, otherwise only the failing ones as
    `WARNING` lines): the two tubes of a bank must be parallel; their distance divided by 28.4 mm must equal the tube id
    difference; each tube's position across the bank must match its assigned id in the nominal geometry; the length
-   removed in step 6 must be 20–40 mm (`survey.EXCESS_LENGTH_RANGE`, set for points at the physical tube ends).
+   removed in step 6 must be in the `excess_length_range` of the entry (default 20–40 mm,
+   `survey_files.DEFAULT_EXCESS_LENGTH_RANGE`, for points at the physical tube ends).
    `loki-pixel-json` and `loki-info` run these checks too when they use a survey calibration, and report failed ones
    on stderr.
 6. **Adjust the tube ends to the straw length** (`find_effective_tube_ends`): if the distance of the two measured points
@@ -254,13 +255,15 @@ Steps 1–4 use the file's entry in `survey_files` (here `SAM606`):
      and the normal must point away from the sample (swapped first / last pixel ends, or a survey frame conversion that
      mirrors the coordinates, would put the back layers in front of the bank)
 8. **Quality report** (`--verbose`, `Detectors.print_quality_report`), per bank:
-   - plane fit residual (with 4 points on 2 lines all 4 residuals are equal in magnitude, with alternating signs; it
+   - plane fit residual (with 4 points on 2 lines all 4 residuals are nearly equal in magnitude, with alternating signs; it
      measures the twist of the two tube axes)
    - angle between the two tubes
    - spacing in tube pitches
    - disagreement of the two tubes' predictions of tube 0
    - the input tube midpoints recomputed from the final corners (end-to-end check)
-   - tilt angle, front face distance and front face centre shift vs the intended geometry
+   - tilt angle (in the section plane) vs the intended geometry, and the roll angle (rotation of the tubes in the bank
+     plane)
+   - front face distance and front face centre shift vs the intended geometry
    - the placement in the drawing's terms (section distance, position angle, offset along the tubes)
 9. **Output** (`--print`, `Detectors.formatted_data`): the corners as straw ends in the `REFERENCE_BANKS_DATA` format,
    the input of `bank_pixels`. Only the banks in the survey are in the output.
@@ -323,7 +326,10 @@ The new file and entry are part of the package, so the installed package must in
    - `bank_notes`: notes printed with the checks of a bank (e.g. a tube made parallel by a fix).
    - `carriage_position`: the position of the detector carriage during the survey of the rear bank (0), in mm from
      its zero position (the position of `detector_carriage_zero`, the 5 m position of the CAD geometry). The bank 0
-     points are moved back along the beam by it. SAM-606: 5000 mm (the rear bank at 10 m). Default 0.
+     points are moved back along the beam by it. SAM-606: 5000 mm (the rear bank at 10 m). Default 0; an error if the
+     label map has no bank 0.
+   - `excess_length_range`: (min, max) of the length removed from each tube by the trimming (step 6 of the chain above)
+     [mm]; default 20–40 mm, for points at the physical tube ends.
    - `calibration_name`: the name of the calibration made from this file. It is needed to use the survey in
      `loki-pixel-json` and `loki-info` (`-c NAME`), and it is the default name of the Geant4 calibration file. A name
      that says when and where the survey was made helps, like `2026-September-SAM-606`.
@@ -381,7 +387,8 @@ loki-info -b 0 -r 10000                           # the rear bank with its front
 loki-info -n 8 -r 4000 -p 0                       # 8 pixels per straw, rear bank at 4 m
 ```
 
-See [Conventions](#conventions) for the ids. The rear bank is placed as in the calibration (CAD: 4999.8 mm); with
+See [Conventions](#conventions) for the ids. The rear bank is placed as in the calibration, at the carriage zero position (CAD:
+4999.8 mm, SAM-606: 4985.65 mm); with
 `--rear-detector-distance` it is moved along z so that its front face centre is at that distance (as Geant4 does). The
 pixel geometry is built from the bank corners by `bank_pixels`, so it is the same as in the NeXus-JSON output and as in
 Geant4 for the same calibration (the tests compare it with the Geant4 pixel centres for the nominal and the SAM-606

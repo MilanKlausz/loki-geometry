@@ -50,7 +50,12 @@ import sys
 import numpy as np
 
 from . import constants as c
-from .survey_files import DEFAULT_SURVEY_FILE, SURVEY_FILES, survey_file_info
+from .survey_files import (
+    DEFAULT_EXCESS_LENGTH_RANGE,
+    DEFAULT_SURVEY_FILE,
+    SURVEY_FILES,
+    survey_file_info,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -59,7 +64,8 @@ from .survey_files import DEFAULT_SURVEY_FILE, SURVEY_FILES, survey_file_info
 # Tolerances of the sanity checks (only warnings are printed, nothing stops)
 PARALLEL_TOLERANCE_DEG = 0.5  # max angle between the 2 tubes of a bank
 TUBE_ID_TOLERANCE = 0.25  # [tube pitch] allowed deviation from integer
-EXCESS_LENGTH_RANGE = (20.0, 40.0)  # [mm] expected measured - effective length
+# [mm] expected measured - effective length (the default; a survey file entry can set its own)
+EXCESS_LENGTH_RANGE = DEFAULT_EXCESS_LENGTH_RANGE
 
 
 def _calibration_constants():
@@ -403,7 +409,12 @@ def get_measured_calibration_data(filename=DEFAULT_SURVEY_FILE, verbose=True):
 
     #    the rear bank (0) moves with the detector carriage: back to the carriage zero position
     carriage_shift = np.array([0.0, 0.0, survey_file.carriage_position])
-    if survey_file.carriage_position and 0 in banks:
+    if survey_file.carriage_position and 0 not in banks:
+        raise ValueError(
+            f"{survey_file.file_name}: the entry has a carriage_position, but no bank 0 (rear "
+            "bank) in its label map"
+        )
+    if survey_file.carriage_position:
         if verbose:
             print(
                 f"Bank 0: measured with the detector carriage at {survey_file.carriage_position} mm "
@@ -444,7 +455,8 @@ def get_measured_calibration_data(filename=DEFAULT_SURVEY_FILE, verbose=True):
             eff_A, eff_B, measured_length, excess = find_effective_tube_ends(
                 tube["end_A"], tube["end_B"], effective_length
             )
-            ok = EXCESS_LENGTH_RANGE[0] <= excess <= EXCESS_LENGTH_RANGE[1]
+            low, high = survey_file.excess_length_range
+            ok = low <= excess <= high
             flag = "" if ok else "  WARNING: unexpected extra length!"
             length_lines.append(
                 (

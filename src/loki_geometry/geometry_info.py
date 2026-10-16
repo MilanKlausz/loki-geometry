@@ -46,8 +46,9 @@ along the beam, y up, z along the beam, origin at the sample) in mm.
   pixel in straw   0 at the first pixel end of the straw
 The rear bank (0) moves along the beam: with rear_detector_distance [mm] it is
 moved along z so that the z of its front face centre is that distance (as the
-Geant4 geometry places it); default: as in the calibration (CAD: 4999.8 mm,
-Geant4 nominal: 5000 mm).
+Geant4 geometry places it); default: as in the calibration, at the carriage
+zero position (CAD: 4999.8 mm, Geant4 nominal: 5000 mm, a survey calibration:
+its surveyed position, e.g. 4985.65 mm for SAM-606).
 
 Per bank (BankGeometry): the front face centre F (the plane touching the front
 layer tubes, in the middle of the front layer and of the straw length) and the
@@ -172,7 +173,7 @@ def calibration_bank_sources(calibration=DEFAULT_CALIBRATION):
     if calibration == NOMINAL_CAD:
         return {b: cad for b in c.BANK_IDS}
     entry = next(e for e in SURVEY_FILES.values() if e.calibration_name == calibration)
-    surveyed = set(_survey_corners(calibration))
+    surveyed = {bank_id for bank_id, _ in entry.label_map.values()}  # the banks of the survey
     survey = f"survey {entry.file_name}" + (f" (sha256 {entry.checksum})" if entry.checksum else "")
     return {b: survey if b in surveyed else cad for b in c.BANK_IDS}
 

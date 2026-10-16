@@ -16,7 +16,8 @@ name. Pixel centre = bank position + pixel offset + centre of the pixel shape
 cylinder (the midpoint of its two face centres), so both pixel reference
 conventions (pixel_centre / pixel_base) are handled, and an inconsistent pixel
 shape shows up as a deviation. The bank position is the sum of the translations
-of the depends_on chain of the group, followed by path to the end ("."): for
+of the depends_on chain of the group, followed by path to the end ("."; absolute
+paths, or paths relative to the group of the depends_on): for
 bank 0 the detector carriage position (its "value": 0 if it has no value, e.g. a
 stream in the instrument file) and detector_carriage_zero. A broken chain (a
 missing node or depends_on, a loop), a transformation that is not a translation
@@ -231,6 +232,8 @@ def pixel_positions_from_tree(data, use_pixel_shape=True):
         if group is None:
             continue
         depends_on = _values(_required_child(group, "depends_on", path), f"{path}/depends_on")
+        if depends_on != "." and not depends_on.startswith("/"):  # relative to the group
+            depends_on = f"{path}/{depends_on}"
         translation = depends_on_translation_mm(depends_on, index, path)
         banks[bank_id] = bank_pixels_from_group(group, translation, use_pixel_shape)
     if not banks:

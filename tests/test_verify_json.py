@@ -431,3 +431,35 @@ def test_a_file_with_the_nodes_at_the_top_level_can_still_be_read(tmp_path, refe
     assert sorted(banks) == list(range(9))
     for bank_id, (_, positions) in banks.items():
         assert np.abs(positions - reference_pixels[bank_id].positions).max() < 1e-4
+
+
+def test_a_relative_depends_on_of_a_bank_group_is_resolved_in_the_group(tmp_path):
+    """NeXus allows a depends_on relative to its group: the same positions as the absolute one."""
+    tree = _tree([1])
+    absolute = vnj.pixel_positions_from_tree(tree)[1][1]
+    _depends_on_dataset(tree, 1)["config"]["values"] = "transformations/trans_2"
+    assert np.array_equal(vnj.pixel_positions_from_tree(tree)[1][1], absolute)
+
+
+def test_bank_0_with_the_carriage_at_its_survey_position_is_where_it_was_measured(measured_json):
+    """Survey -> JSON -> detector carriage value: with the carriage position of the survey, the
+    rear bank of the file is where it was measured. Tube 0 (centre straw) is compared with the
+    measured tube C3P1 (trimmed to the straw length) within the residuals of the bank model
+    (< 1 mm: the measured tubes are 1.4 mm farther apart than 55 tube pitches)."""
+    from loki_geometry import survey
+    from loki_geometry import survey_files as sf
+
+    tree = json.loads(measured_json.read_text())
+    at_zero = vnj.pixel_positions_from_tree(tree)[0][1]
+    vnj.node_index(tree)[f"{CARRIAGE_VALUE}/value"]["config"]["values"] = (
+        sf.SAM606.carriage_position
+    )
+    moved = vnj.pixel_positions_from_tree(tree)[0][1]
+    assert np.allclose(moved - at_zero, [0.0, 0.0, sf.SAM606.carriage_position], atol=1e-6)
+    raw = survey.read_measured_points(sf.SAM606.path)
+    first, last = (sf.tank_window_frame(raw[label]) for label in ("C3P1I", "C3P1II"))
+    first, last, _, _ = survey.find_effective_tube_ends(first, last, 1000.0)
+    n = 2
+    expected = first + (last - first) * ((np.arange(n) + 0.5) / n)[:, None]
+    tube_0_centre_straw = moved[3 * n : 4 * n]
+    assert np.linalg.norm(tube_0_centre_straw - expected, axis=1).max() < 1.0
