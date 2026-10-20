@@ -27,6 +27,7 @@ The tests need pytest.
 ```
 pip install .                          # from a clone of the repository
 pip install -e ".[test]"               # editable install for development, with pytest
+pip install ".[nexus]"                 # with h5py and mcpl: loki-nexus-geometry, loki-nexus-sim
 pip install "git+https://github.com/MilanKlausz/loki-geometry.git"   # directly from the git repository
 ```
 
@@ -104,6 +105,7 @@ Modules of `loki_geometry` (in `src/loki_geometry/`):
 | `calibration` (`loki-calibrate`) | The calibration: calibration data → 8 corner positions per bank, quality report, comparison with the intended geometry, output in the `REFERENCE_BANKS_DATA` format. |
 | `bank_pixels` | Pixel geometry core: from the 8 corners of a bank to the detector numbers and the pixel offsets (pixel centres or bases) of all its pixels (tube grid from vector steps between the corners, straw layout of Geant4, mirrored straw pattern for the upside-down banks 1, 2, 5, 6 derived from the corners). Corners are rejected if they are not finite, not consistent with each other (> 0.1 mm), have other tube pitches than 28.40 / 27.00 mm (> 0.5 mm, e.g. corners of another bank), are in the wrong order (first / last pixel ends swapped give a left-handed frame, A[1] / A[2] swapped give wrong tube pitches) give a straw pattern that does not match the bank, or have another straw length than the nominal one of the bank (> 0.1 mm: e.g. untrimmed tube ends or pixel-centre corners). |
 | `nexus_json` (`loki-pixel-json`) | The main output: the pixel geometry of a bank calibration (default: the measured geometry of the default survey) as NeXus-JSON nodes (the geometry parts of the `loki_detector_<id>` groups, plus `detector_carriage_zero` for the rear bank) in the instrument tree of the instrument JSON file, ready to be copied into it. |
+| `nexus_hdf5` (`loki-nexus-geometry`, `loki-nexus-sim`) | NeXus HDF5 files in the format of the measured files: replaces the detector geometry of a file by that of a bank calibration, and writes simulated detection events with the structure of a measured file, for the data reduction of the measured data. See [NeXus HDF5 files](#nexus-hdf5-files). |
 | `verify_json` (`loki-verify-json`) | Compares the pixel positions of a NeXus-JSON file with the expected ones: those of the calibration recorded in the file (the output above), otherwise (e.g. the full file `loki.json`) those of the nominal Geant4 geometry, as `scripts/verifyJSON` of G4GeoLoki does. |
 | `geometry_info` (`loki-info`) | Geometry information for a chosen bank calibration: the placement of each bank (front face centre, axes, corners), the tube and straw ends, the pixel centres, and the id conversions (pixel id, detector number, bank / tube / straw / pixel). See [Geometry information](#geometry-information). |
 | `geant4_calibration` | Writes (and reads) the bank calibration file of the Geant4 geometry: per bank the front face centre and the three bank axes, selected in Geant4 with the geometry parameter `bank_calibration`. See [Bank calibration for the Geant4 geometry](#bank-calibration-for-the-geant4-geometry). |
@@ -468,6 +470,41 @@ loki-calibrate --geant4-calibration-file my_test.txt --geant4-calibration-name m
 ```
 
 (`DGCODE` = a dgcode_projects checkout. The third one gives Geant4 the intended CAD geometry.)
+
+## NeXus HDF5 files
+
+`nexus_hdf5` works on NeXus HDF5 files of LOKI as written by the ESS file-writer (needs `h5py`, and `mcpl` for MCPL
+input: `pip install ".[nexus]"`).
+
+```
+loki-nexus-geometry measured.hdf measured_sam606.hdf -c 2026-September-SAM-606
+loki-nexus-sim detectionEvents*.mcpl -t measured.hdf -o simulated.hdf -d 600 [-c CALIBRATION] [--uniform-time-offset]
+```
+
+- **`loki-nexus-geometry`** copies a file and replaces, in every `loki_detector_<id>` group, `detector_number`, the
+  `x/y/z_pixel_offset` (pixel centres) and the `pixel_shape` (a cylinder centred on the offsets) by those of the
+  calibration (with the number of pixels per straw of the file), and sets the bank position through the
+  transformation chain of the bank in the file: the first `detector_carriage_zero` of the chain (bank 0), otherwise
+  the own translation of the bank, is set so that the whole chain (with the detector carriage motion at zero) gives
+  the bank position of the calibration. Other transformations of the chain (e.g. a common reference such as
+  `window_guard`) are kept, whatever the layout of the file. The events and all other data are kept; a
+  `geometry_replacement` NXnote records the calibration.
+- **`loki-nexus-sim`** writes simulated detection events with the structure of a measured file (the template):
+  - kept: the instrument components with their geometry and transformation chains (detectors, monitors, choppers,
+    slits, collimators, beam stop, sample stack, detector carriage, `window_guard`, source, sample), the NXlog values
+    (without the control-system fields: alarms, connection status, cue index, idle flags, target values);
+  - not written: the users, the scripts, the data acquisition and template information, the environment sensors
+    (`julabo_*`, `thermometer_*`, `vacuum`), the shutters, the laser mirror and the accelerator logs of the source;
+  - set: the detector geometry of the calibration of the simulation (`-c`; default: the `bank_calibration` of the
+    MCPL metadata), the detector carriage position (`--carriage-mm`; default: from the `rear_detector_distance_m` of
+    the MCPL metadata), the title, start and end time, `experiment_identifier` = `simulation`, and a `simulation`
+    NXnote with the inputs;
+  - events: MCPL detection event files (the pixel id, 0-based, in the `ekin` field, the time of flight [ms] in the
+    `time` field) or `.npz` files (`pixel_id`, `time_ms`); the detector number is pixel id + 1, so the simulation
+    must use the number of pixels per straw of the template. The events are assigned randomly to the 14 Hz pulses of
+    the measuring time `-d` [s]; `event_time_offset` is the time of flight modulo the pulse period, or uniform in
+    the pulse period with `--uniform-time-offset` (sources without pulses, e.g. AmBe source tests);
+  - the monitors get empty event data (no simulated monitor events).
 
 ## Other commands
 

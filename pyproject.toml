@@ -14,8 +14,9 @@ license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 
 [project.optional-dependencies]
+nexus = ["h5py", "mcpl"]  # loki-nexus-geometry, loki-nexus-sim
 test = ["pytest"]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "h5py"]
 
 [project.scripts]
 loki-calibrate = "loki_geometry.calibration:main"
@@ -25,6 +26,8 @@ loki-verify-json = "loki_geometry.verify_json:main"
 loki-geant4-validate = "loki_geometry.geant4:main"
 loki-nominal-corners = "loki_geometry.nominal_corners:cli"
 loki-info = "loki_geometry.geometry_info:main"
+loki-nexus-geometry = "loki_geometry.nexus_hdf5:main_geometry"
+loki-nexus-sim = "loki_geometry.nexus_hdf5:main_sim"
 
 [tool.setuptools.dynamic]
 version = { attr = "loki_geometry.__version__" }

@@ -109,6 +109,8 @@ def test_console_scripts_point_to_callables():
         "loki-geant4-validate",
         "loki-nominal-corners",
         "loki-info",
+        "loki-nexus-geometry",
+        "loki-nexus-sim",
     }
     for target in scripts.values():
         module_name, function_name = target.split(":")
@@ -151,9 +153,13 @@ def test_readme_module_table_lists_every_module_and_script():
     )
     for module in modules:
         assert f"| `{module}`" in text, module
+    rows = {line.split("`")[1]: line for line in text.splitlines() if line.startswith("| `")}
     for script, target in console_scripts().items():
         module = target.split(":")[0].rsplit(".", 1)[1]
-        assert f"| `{module}` (`{script}`)" in text, script
+        # the module row names its scripts: | `module` (`script`[, `script2`])
+        assert re.match(
+            rf"\| `{module}` \((`[a-z0-9-]+`, )*`{script}`[,)]", rows.get(module, "")
+        ), script
 
 
 def test_readme_numbers_match_the_constants():
