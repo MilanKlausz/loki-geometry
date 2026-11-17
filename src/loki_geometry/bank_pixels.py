@@ -21,7 +21,8 @@ Model of a bank:
     (a parallelogram grid: the layers are shifted along the rows, because the
     packs are tilted by 13.45 degrees);
   - 7 straws per tube in a fixed hexagonal pattern around the tube axis
-    (straw 3 is the centre straw), see STRAW_POSITIONS_PACK_FRAME;
+    (straw 3 is the centre straw), see STRAW_POSITIONS_PACK_FRAME; the straw ids
+    follow the LoKI readout (LOKI_STRAW_POSITIONS_IN_TUBE in constants.py);
   - N pixels per straw along the straw, pixel k centred at (k + 0.5) * L / N
     from the first pixel end (L = straw length = |B[0] - A[0]|).
 
@@ -89,10 +90,10 @@ from .constants import (
     CENTRE_STRAW,
     DEFAULT_PIXELS_PER_STRAW,
     LAYERS_PER_BANK,
+    LOKI_STRAW_POSITIONS_IN_TUBE,
     NUMBER_OF_BANKS,
     STRAW_HEXAGON_ROTATION,
     STRAW_LENGTHS,
-    STRAW_POSITIONS_IN_TUBE,
     STRAW_RADIUS,
     STRAW_TABLE_ROTATION_OFFSET,
     STRAWS_PER_TUBE,
@@ -154,7 +155,8 @@ _PIXEL_REFERENCE_FRACTION = {PIXEL_CENTRE: 0.5, PIXEL_BASE: 0.0}  # position wit
 # rotated by 8.45 - 30 - 13.45 deg in the pack, and the pack by +13.45 deg.)
 # Checked against the Geant4 geometry in tests/test_bank_pixels.py.
 _STRAW_PATTERN_ROTATION = np.radians(90.0 + STRAW_HEXAGON_ROTATION + STRAW_TABLE_ROTATION_OFFSET)
-_STRAW_POSITIONS_TUBE_FRAME = np.array(STRAW_POSITIONS_IN_TUBE)
+# by straw id: the LoKI straw order, reversed relative to the Geant4 straw table (see constants.py)
+_STRAW_POSITIONS_TUBE_FRAME = np.array(LOKI_STRAW_POSITIONS_IN_TUBE)
 
 
 def _rotate_2d(points, angle):

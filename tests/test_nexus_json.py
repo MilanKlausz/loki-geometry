@@ -16,6 +16,7 @@ from loki_json_reference import (  # the values of loki.json
     LOKI_JSON_SAMPLE_OFFSETS_M,
     LOKI_JSON_TRANSLATIONS,
     LOKI_JSON_TUBE0_STRAW_OFFSETS_MM,
+    loki_json_local_index,
 )
 
 from loki_geometry import bank_pixels as lbp
@@ -280,9 +281,10 @@ def test_bank_pixel_id_ranges_match_loki_json():
 @pytest.mark.parametrize("bank_id", ALL_BANKS)
 def test_tube0_straw_positions_match_loki_json(bank_id):
     """Straw order and mirroring in the upside-down banks and the pixel centre
-    offset along the straw, for all 7 straws of tube 0."""
+    offset along the straw, for all 7 straws of tube 0. loki.json has the straws in the
+    opposite order (its straw s is our straw 6 - s, see loki_json_local_index)."""
     bank = lbp.compute_bank_pixels(bank_id, REFERENCE_BANKS_DATA[bank_id], 512)
-    first_pixels = bank.offsets[[straw * 512 for straw in range(7)]]
+    first_pixels = bank.offsets[[loki_json_local_index(straw * 512) for straw in range(7)]]
     # loki.json: 5 decimals in m, straw distance sqrt(1.14^2 + 7.67^2) = 7.754 mm
     assert np.allclose(first_pixels, LOKI_JSON_TUBE0_STRAW_OFFSETS_MM[bank_id], atol=0.015)
 
@@ -295,10 +297,10 @@ def pixels_512():
 @pytest.mark.parametrize("bank_id", ALL_BANKS)
 def test_pixel_offsets_agree_with_loki_json(pixels_512, bank_id):
     """loki.json was made from the same corners; its straw positions are rounded
-    to 5 decimals in m, so the offsets agree within 0.011 mm."""
+    to 5 decimals in m, so the offsets agree within 0.011 mm (its straw s is our straw 6 - s)."""
     offsets = pixels_512[bank_id].offsets
     for index, expected in LOKI_JSON_SAMPLE_OFFSETS_M[bank_id].items():
-        assert np.abs(offsets[index] - np.array(expected) * 1000).max() < 0.011
+        assert np.abs(offsets[loki_json_local_index(index)] - np.array(expected) * 1000).max() < 0.011
 
 
 @pytest.mark.parametrize("bank_id", ALL_BANKS)

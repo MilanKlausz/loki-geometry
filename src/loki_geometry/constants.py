@@ -70,6 +70,13 @@ STRAW_POSITIONS_IN_TUBE = (
     (0.0, STRAW_STRAW_DISTANCE),
     (_HALF_WIDTH, 0.5 * STRAW_STRAW_DISTANCE),
 )
+# Straw axes by straw id (the straw number of the readout and of the pixel ids) [mm]. The real detectors number
+# the straws of a tube in the opposite order to the originally intended numbering of the table above: straw id s
+# sits where the table puts straw 6 - s, a 180 deg turn of the hexagon about the tube axis (the same in all
+# tubes; found in the AmBe source tests of October 2026). G4GeoLoki: BcsTube::getLokiStrawPositionX/Y.
+LOKI_STRAW_POSITIONS_IN_TUBE = tuple(
+    STRAW_POSITIONS_IN_TUBE[STRAWS_PER_TUBE - 1 - straw] for straw in range(STRAWS_PER_TUBE)
+)
 # Rotation of the straw hexagon in the bank (after the pack rotation) [deg],
 # and the rotation of the Geant4 table above relative to that reference (BcsPack.cc).
 STRAW_HEXAGON_ROTATION = 8.45

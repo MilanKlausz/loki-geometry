@@ -2,6 +2,17 @@
 for the tests (the file itself is not part of the repository). Used by test_nexus_json.py
 and test_geometry_info.py."""
 
+
+def loki_json_local_index(local_index, pixels_per_straw=512):
+    """The bank-local pixel index in loki.json of the pixel at the same place as our pixel `local_index`.
+    loki.json numbers the straws of a tube in the order of the Geant4 straw table, ours follow the LoKI
+    readout (straw id s at the place of table straw 6 - s, see LOKI_STRAW_POSITIONS_IN_TUBE), so the
+    straw is mirrored: s <-> 6 - s; tube and pixel are the same."""
+    tube, rest = divmod(local_index, 7 * pixels_per_straw)
+    straw, pixel = divmod(rest, pixels_per_straw)
+    return (tube * 7 + 6 - straw) * pixels_per_straw + pixel
+
+
 # detector_number of the first pixel of each bank
 LOKI_JSON_FIRST_IDS_512 = (1, 802817, 1032193, 1204225, 1433601, 1605633, 2007041, 2465793, 2752513)
 

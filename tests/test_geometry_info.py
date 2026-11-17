@@ -9,7 +9,7 @@ import os
 import numpy as np
 import pytest
 from geant4_reference import GEANT4_SAM606_PIXELS
-from loki_json_reference import LOKI_JSON_SAMPLE_OFFSETS_M, LOKI_JSON_TRANSLATIONS
+from loki_json_reference import LOKI_JSON_SAMPLE_OFFSETS_M, LOKI_JSON_TRANSLATIONS, loki_json_local_index
 
 from loki_geometry import bank_pixels as lbp
 from loki_geometry import constants as c
@@ -92,14 +92,14 @@ def test_cad_reproduces_the_reference_corners(cad, bank_id):
 
 def test_cad_pixel_positions_agree_with_loki_json(cad512):
     """loki.json (512 pixels per straw) was made from the CAD corners: translation + pixel
-    offset (5 decimals in m) agree within 0.011 mm."""
+    offset (5 decimals in m) agree within 0.011 mm (its straw s is our straw 6 - s)."""
     for bank_id, samples in LOKI_JSON_SAMPLE_OFFSETS_M.items():
         magnitude, vector = LOKI_JSON_TRANSLATIONS[bank_id]
         translation = magnitude * np.array(vector) * 1000
         first = cad512.first_pixel_id(bank_id)
         for local, offset in samples.items():
             expected = translation + np.array(offset) * 1000
-            assert np.abs(cad512.pixel_centre(first + local) - expected).max() < 0.011, (
+            assert np.abs(cad512.pixel_centre(first + loki_json_local_index(local)) - expected).max() < 0.011, (
                 bank_id,
                 local,
             )
@@ -311,7 +311,7 @@ def test_cli_pixel_and_detector_number(capsys):
     _, in_m = run(
         ["-c", "nominal-cad-geometry", "-p", "0", "--unit", "m", "--precision", "6"], capsys
     )
-    assert "centre [m]: (0.498047, 0.779861, 5.004834)" in in_m
+    assert "centre [m]: (0.498047, 0.782139, 5.020166)" in in_m  # straw 0: where the Geant4 table puts straw 6
 
 
 def test_cli_bank_tube_straw(capsys):
